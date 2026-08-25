@@ -1434,7 +1434,7 @@ def load_appointments_for_timeline(provider_id):
 
         appointments_list.append({
             "id": a.id,
-            "type": "termin",
+            "type": "Termin",
             "customer_name": a.customer_name,
             "service": a.service_id,
             "start": start,
@@ -1464,7 +1464,7 @@ def load_queue_for_timeline(provider_id):
 
         queues_list.append({
             "id": q.id,
-            "type": "walkin",
+            "type": "Walk-in",
             "customer_name": q.customer_name,
             "service": q.service_id,
             "duration": q.duration_minutes,
@@ -1475,7 +1475,6 @@ def load_queue_for_timeline(provider_id):
             "status": q.status,
             "position": q.position
         })
-
     session_db.close()
     return queues_list
 
@@ -1511,7 +1510,7 @@ def build_timeline(appointments, queue):
 
         timeline.append({
             "id": q["id"],
-            "type": "walkin",
+            "type": "Walk-in",
             "customer_name": q["customer_name"],
             "service": q["service"],
             "start": slot_start,
@@ -1580,7 +1579,7 @@ def get_timeline():
         calendar_events = []
 
         for item in events:
-            if item["type"] == "termin" and item["status"] in ("pending", "confirmed", "in_progress"):
+            if item["type"] == "Termin" and item["status"] in ("pending", "confirmed", "in_progress"):
                 if item["end"] < now:
                     session_db.query(Appointment).filter(
                         Appointment.provider_id == provider_id,
@@ -1602,7 +1601,7 @@ def get_timeline():
                     item["status"] = "in_progress"
 
 
-            elif item["type"] == "walkin" and item["status"] in ("assigned", "in_progress"):
+            elif item["type"] == "Walk-in" and item["status"] in ("assigned", "in_progress"):
                 if item["end"] < now:
                     session_db.query(QueueEntry).filter(
                         QueueEntry.provider_id == provider_id,
@@ -1622,7 +1621,7 @@ def get_timeline():
                     item["status"] = "in_progress"
 
 
-            if item["type"] == "walkin":
+            if item["type"] == "Walk-in":
                 if item["status"] not in ("completed", "no_show", "in_progress"):
                     session_db.query(QueueEntry).filter_by(
                         id=item["id"]
@@ -2058,7 +2057,7 @@ def save_business_info():
 
 @app.route("/dashboard/settings/update_email/code/send", methods=["POST"])
 @login_required
-async def update_email_send_code():
+def update_email_send_code():
     email = request.form.get("email")
 
     SMTP_SERVER = "smtp.gmail.com"
@@ -2755,6 +2754,26 @@ def customer_join_queue(token):
         queue_id = new_entry.id
         session_db.commit()
 
+        appointments = load_appointments_for_timeline(settings.provider_id)
+        queue = load_queue_for_timeline(settings.provider_id)
+
+        events = build_timeline(appointments, queue)
+
+        for e in events:
+           if e["type"] == "Walk-in":
+               if e["status"] == "pending" or e["status"] == "in_progress":
+                   entry = session_db.query(QueueEntry).filter_by(
+                        id=e["id"],
+                        provider_id=settings.provider_id
+                    ).first()
+
+                   if entry:
+                        entry.start = e["start"]
+                        entry.end = e["end"]
+                        entry.status = "assigned"
+
+        session_db.commit()
+
         return jsonify({"queue_id": queue_id}), 200
 
     except Exception as e:
@@ -2766,7 +2785,110 @@ def customer_join_queue(token):
 
 @app.route("/queue/<string:token>/status/<int:queue_id>")
 def customer_queue_status(token, queue_id):
-    pass
+    session_db = Session()
+    try:
+        settings = session_db.query(ProviderSettings).filter_by(
+            queue_token=token
+        ).first()
+
+        if not settings:
+            return render_template("queue_invalid.html"), 404
+
+        entry = session_db.query(QueueEntry).filter_by(
+            id=queue_id,
+            provider_id=settings.provider_id
+        ).first()
+
+        if not entry:
+            return render_template("queue_invalid.html"), 404
+
+        provider = session_db.query(Provider).filter_by(
+            id=settings.provider_id
+        ).first()
+
+        return render_template("customer_queue_status.html",
+               provider=provider,
+               token=token,
+               queue_id=queue_id,
+       )
+    except Exception as e:
+        print(e)
+        return jsonify({"error": str(e)}), 500
+
+    finally:
+        session_db.close()
+
+@app.route("/queue/<string:token>/status/<int:queue_id>/data")
+def customer_queue_status_data(token, queue_id):
+    statusMap = {
+        "pending": "Ausstehend",
+        "no_show": "Nicht erschienen",
+        "completed": "Erledigt",
+        "assigned": "Wartend",
+        "in_progress": "Dran"
+    }
+
+    session_db = Session()
+    try:
+        settings = session_db.query(ProviderSettings).filter_by(
+            queue_token=token
+        ).first()
+
+        if not settings:
+            return render_template("queue_invalid.html"), 404
+
+        entry = session_db.query(QueueEntry).filter_by(
+            id=queue_id,
+            provider_id=settings.provider_id
+        ).first()
+
+        if not entry:
+            return jsonify({"error": "Nicht gefunden"}), 404
+
+        if entry.status == "completed":
+            return jsonify({"status": statusMap["completed"]}), 200
+
+        if entry.status == "no_show":
+            return jsonify({"status": statusMap["no_show"]}), 200
+
+        estimated_minutes = None
+        if entry.start:
+            start_aware = entry.start.astimezone()
+            end_aware = entry.end.astimezone()
+            now = datetime.datetime.now().astimezone().replace(second=0, microsecond=0)
+            diff_seconds = (start_aware - now).total_seconds()
+            estimated_minutes = max(round(int(diff_seconds) / 60), 0)
+
+            if end_aware < now:
+                session_db.query(QueueEntry).filter_by(
+                    id=queue_id,
+                    provider_id=settings.provider_id
+                ).update({QueueEntry.status: "completed"})
+
+                session_db.commit()
+
+                entry.status = "completed"
+
+            if start_aware <= now <= end_aware:
+                session_db.query(QueueEntry).filter_by(
+                    id=queue_id,
+                    provider_id=settings.provider_id
+                ).update({QueueEntry.status: "in_progress"})
+
+                session_db.commit()
+
+                entry.status = "in_progress"
+
+        return jsonify({
+            "name": entry.customer_name,
+            "status": statusMap[f"{entry.status}"],
+            "position": entry.position,
+            "estimated_wait_minutes": estimated_minutes
+        }), 200
+
+    finally:
+        session_db.close()
+
 
 
 @app.route("/dashboard/upgrade")
