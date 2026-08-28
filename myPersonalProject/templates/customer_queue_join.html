@@ -64,8 +64,8 @@
         .form-group {
             display: flex;
             flex-direction: column;
-            gap: 8px;
-            margin-bottom: 20px;
+            gap: 6px;
+            margin-bottom: 16px;
         }
 
         .form-group label {
@@ -80,7 +80,6 @@
             border-radius: 8px;
             border: 1px solid #d0d7e2;
             font-size: 16px;
-            flex: 1;
             transition: border-color .2s, box-shadow .2s;
             font-family: inherit;
             background: white;
@@ -154,6 +153,19 @@
             color: #9ca3af;
             margin-top: 20px;
         }
+
+        .checkbox-list {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .checkbox-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 15px;
+        }
     </style>
 </head>
 <body>
@@ -188,13 +200,15 @@
         </div>
 
         <div class="form-group">
-            <label for="customer_service">Service</label>
-            <select id="customer_service">
-                <option value="">Service auswählen...</option>
+            <label for="service-checkboxes">Service</label>
+            <div id="service-checkboxes" class="checkbox-list">
                 {% for s in service %}
-                    <option value="{{ s.id }}">{{ s.name }} ({{ s.duration_minutes }} Min)</option>
+                    <label class="checkbox-item">
+                        <input type="checkbox" value="{{ s.id }}" data-duration="{{ s.duration_minutes }}">
+                        {{ s.name }} ({{ s.duration_minutes }} Min)
+                    </label>
                 {% endfor %}
-            </select>
+            </div>
         </div>
 
         <button class="btn-primary" id="submit-btn" onclick="joinQueue()">
@@ -218,29 +232,35 @@
 
 <script>
     async function joinQueue() {
-      const name = document.getElementById("customer_name").value.trim();
-      const phone = document.getElementById("customer_phone").value.trim();
-      const service_id = document.getElementById("customer_service").value;
-      const errorMsg = document.getElementById("error-msg");
+        const selectedServices = [];
+        const name = document.getElementById("customer_name").value.trim();
+        const phone = document.getElementById("customer_phone").value.trim();
+        const checkboxes = document.querySelectorAll("#service-checkboxes input[type='checkbox']:checked");
+        const errorMsg = document.getElementById("error-msg");
 
-      if (!name || !service_id) {
+        checkboxes.forEach(cb => {
+          if (cb.checked) selectedServices.push(cb.value);
+        });
+
+
+        if (!name || selectedServices.length === 0) {
           errorMsg.textContent = "Bitte Name und Service ausfüllen.";
           errorMsg.classList.add("show");
           return;
-      }
+        }
 
-      errorMsg.classList.remove("show");
+        errorMsg.classList.remove("show");
 
-      const btn = document.getElementById("submit-btn");
-      btn.disabled = true;
-      btn.textContent = "Wird eingetragen...";
+        const btn = document.getElementById("submit-btn");
+        btn.disabled = true;
+        btn.textContent = "Wird eingetragen...";
 
-      const formData = new FormData();
-      formData.append("customer_name", name);
-      formData.append("customer_phone", phone);
-      formData.append("service_id", service_id);
+        const formData = new FormData();
+        formData.append("customer_name", name);
+        formData.append("customer_phone", phone);
+        selectedServices.forEach(s => formData.append("services[]", s));
 
-      try {
+        try {
           const res = await fetch("/queue/{{ token }}/join", {
               method: "POST",
               body: formData
@@ -256,12 +276,12 @@
               errorMsg.textContent = data.error || "Ein Fehler ist aufgetreten.";
               errorMsg.classList.add("show");
           }
-      } catch (e) {
+        } catch (e) {
           btn.disabled = false;
           btn.textContent = "Jetzt eintragen →";
           errorMsg.textContent = "Verbindungsfehler. Bitte versuche es erneut.";
           errorMsg.classList.add("show");
-      }
+        }
     }
 </script>
 </body>

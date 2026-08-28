@@ -18,6 +18,7 @@ from twilio.rest import Client
 import qrcode
 from io import BytesIO
 import secrets
+import json
 
 from database_manager import Session, Provider, ProviderCredentials, ProviderService, ProviderSettings, Appointment, QueueEntry, ProviderSubscription, ProviderStaff, User
 
@@ -594,22 +595,33 @@ def appointments():
 
     phone_number = request.form.get("appointment_phone")
     customer_email = request.form.get("appointment_email")
-    service_id = request.form.get("appointment_service")
+    services = request.form.getlist("services[]")
     notes = request.form.get("appointment_notes")
 
     session_db = Session()
     try:
-
-        service = session_db.query(ProviderService).filter_by(id=int(service_id)).first()
-
-        if not service:
+        if not services:
             emit_to_user("error", {
-                "error": "Der ausgewählte Service existiert nicht."
+                "error": "Bitte mindestens einen Service auswählen."
             })
-            return jsonify({"error": "Service nicht gefunden."}), 400
+            return jsonify({"error": "Kein Service ausgewählt."}), 400
 
-        duration_delta = datetime.timedelta(minutes=service.duration_minutes)
-        end_datetime = (start_datetime + duration_delta).astimezone()
+        duration_list = []
+
+        for s in services:
+            service = session_db.query(ProviderService).filter_by(
+                id=int(s),
+                provider_id=provider_id
+            ).first()
+
+            if not service:
+                emit_to_user("error", {"error": "Ein ausgewählter Service existiert nicht."})
+                return jsonify({"error": "Service nicht gefunden."}), 400
+
+            duration_list.append(service.duration_minutes)
+
+        total_duration = sum(duration_list)
+        end_datetime = (start_datetime + datetime.timedelta(minutes=total_duration)).astimezone()
 
         if has_conflict(provider_id, start_datetime, end_datetime):
             emit_to_user("error", {
@@ -625,9 +637,9 @@ def appointments():
                 customer_email=customer_email,
                 start=start_datetime,
                 end=end_datetime,
-                duration_minutes=service.duration_minutes,
+                duration_minutes=total_duration,
                 notes=notes,
-                service_id=service.id,
+                services_json=json.dumps(services),
                 status="pending"
             )
 
@@ -668,78 +680,83 @@ def edit_appointment(appointment_id):
 
     phone_number = request.form.get("appointment_phone")
     customer_email = request.form.get("appointment_email")
-    service_id = request.form.get("appointment_service")
+
+    services = request.form.getlist("services[]")
+
     notes = request.form.get("appointment_notes")
 
     session_db = Session()
     try:
-        service = session_db.query(ProviderService).filter_by(id=int(service_id)).first()
+        if not services:
+            emit_to_user("error", {"error": "Bitte mindestens einen Service auswählen."})
+            return jsonify({"error": "Kein Service ausgewählt."}), 400
 
-        if not service:
-            emit_to_user("error", {
-                "error": "Der ausgewählte Service existiert nicht."
-            })
-            return jsonify({"error": "Service nicht gefunden."}), 400
+        duration_list = []
 
-        duration_delta = datetime.timedelta(minutes=service.duration_minutes)
-        end_datetime = (start_datetime + duration_delta).astimezone()
+        for s in services:
+            service = session_db.query(ProviderService).filter_by(
+                id=int(s),
+                provider_id=provider_id
+            ).first()
+
+            if not service:
+                emit_to_user("error", {"error": "Ein ausgewählter Service existiert nicht."})
+                return jsonify({"error": "Service nicht gefunden."}), 400
+
+            duration_list.append(service.duration_minutes)
+
+        total_duration = sum(duration_list)
+        end_datetime = (start_datetime + datetime.timedelta(minutes=total_duration)).astimezone()
 
         if has_conflict(provider_id, start_datetime, end_datetime, appointment_id):
-            emit_to_user("error", {
-                "error": "Dieser Zeitraum ist bereits vergeben."
-            })
+            emit_to_user("error", {"error": "Dieser Zeitraum ist bereits vergeben."})
             return jsonify({"error": "Zeit bereits belegt."}), 400
 
-
-        appointment = session_db.query(Appointment).filter_by(id=appointment_id, provider_id=provider_id).first()
+        appointment = session_db.query(Appointment).filter_by(
+            id=appointment_id,
+            provider_id=provider_id
+        ).first()
 
         if not appointment:
-            emit_to_user("error", {
-                "error": "Der Termin wurde erfolgreich aktualisiert."
-            })
+            emit_to_user("error", {"error": "Der Termin wurde erfolgreich aktualisiert."})
             return jsonify({"error": "Termin nicht gefunden."}), 404
 
         current_status = appointment.status if appointment else 'pending'
 
         if start_datetime != appointment.start.astimezone():
             if appointment.start.astimezone() <= now:
-                emit_to_user("error", {
-                    "error": "Vergangene oder laufende Termine können nicht verschoben werden."
-                })
+                emit_to_user("error", {"error": "Vergangene oder laufende Termine können nicht verschoben werden."})
                 return jsonify({"error": "Der Termin liegt in der Vergangenheit."}), 400
 
             if start_datetime < now:
-                emit_to_user("error", {
-                    "error": "Der Termin kann nicht in die Vergangenheit verschoben werden."
-                })
+                emit_to_user("error", {"error": "Der Termin kann nicht in die Vergangenheit verschoben werden."})
                 return jsonify({"error": "Der Termin liegt in der Vergangenheit."}), 400
 
         appointment.customer_name = customer_name
         appointment.start = start_datetime
         appointment.end = end_datetime
-        appointment.duration_minutes = service.duration_minutes
+        appointment.duration_minutes = total_duration
         appointment.customer_phone = phone_number
         appointment.customer_email = customer_email
         appointment.notes = notes
-        appointment.service_id = service.id
+
+        appointment.services_json = json.dumps(services)
+
         appointment.status = current_status
 
         session_db.commit()
 
-        emit_to_user("message", {
-            "message": "Termin erfolgreich aktualisiert."
-        })
+        emit_to_user("message", {"message": "Termin erfolgreich aktualisiert."})
         return jsonify({"message": "Termin aktualisiert."}), 200
 
     except Exception as e:
         print(e)
-        emit_to_user("error", {
-            "error": "Beim Aktualisieren des Termins ist ein Fehler aufgetreten."
-        })
+        emit_to_user("error", {"error": "Beim Aktualisieren des Termins ist ein Fehler aufgetreten."})
         return jsonify({"error": str(e)}), 500
 
     finally:
         session_db.close()
+
 
 def has_conflict(provider_id, start, end, exclude_appointment_id=None):
     session_db = Session()
@@ -959,23 +976,30 @@ def appointments_today():
     day_start = datetime.datetime.combine(today, datetime.time.min)
     day_end = datetime.datetime.combine(today, datetime.time.max)
 
-
     session_db = Session()
 
     appointments = session_db.query(Appointment).filter(
-        Appointment.start.between(day_start, day_end) ,
+        Appointment.start.between(day_start, day_end),
         Appointment.provider_id == current_user.id,
         Appointment.status.not_in(["no_show"])
     ).all()
 
-    session_db.close()
-
-    # FullCalendar-Format
-
     appointments_fc = []
 
     for a in appointments:
-        service = session_db.query(ProviderService).filter_by(id=a.service_id).first()
+        try:
+            service_ids = json.loads(a.services_json)
+        except:
+            service_ids = []
+
+        services = session_db.query(ProviderService).filter(
+            ProviderService.id.in_(service_ids)
+        ).all()
+
+        if services:
+            service_names = " + ".join([s.name for s in services])
+        else:
+            service_names = None
 
         appointments_fc.append({
             "title": a.customer_name,
@@ -983,14 +1007,18 @@ def appointments_today():
             "end": a.end.astimezone(),
             "extendedProps": {
                 "duration": a.duration_minutes,
-                "service": service.name if service else None,
+                "service": service_names,
                 "status": a.status
             }
         })
+
+    session_db.close()
+
     return jsonify({
         "date": today,
         "appointments": appointments_fc
     })
+
 
 
 @app.route("/dashboard/appointments/next", methods=["GET"])
@@ -1009,7 +1037,17 @@ def next_appointment():
     appointments_fc = []
 
     for a in appointments:
-        service = session_db.query(ProviderService).filter_by(id=a.service_id).first()
+        try:
+            service_ids = json.loads(a.services_json)
+        except:
+            service_ids = []
+
+        # Alle Services laden
+        services = session_db.query(ProviderService).filter(
+            ProviderService.id.in_(service_ids)
+        ).all()
+
+        service_names = " + ".join([s.name for s in services]) if services else None
 
         appointments_fc.append({
             "title": a.customer_name,
@@ -1018,7 +1056,7 @@ def next_appointment():
             "extendedProps": {
                 "type": "Termin",
                 "duration": a.duration_minutes,
-                "service": service.name if service else None,
+                "service": service_names,
                 "status": a.status
             }
         })
@@ -1029,23 +1067,33 @@ def next_appointment():
         QueueEntry.status != "completed"
     ).all()
 
-    session_db.close()
-
     queues_fc = []
 
     for q in queues:
-        service = session_db.query(ProviderService).filter_by(id=q.service_id).first()
+        try:
+            service_ids = json.loads(q.services_json)
+        except:
+            service_ids = []
+
+        services = session_db.query(ProviderService).filter(
+            ProviderService.id.in_(service_ids)
+        ).all()
+
+        service_names = " + ".join([s.name for s in services]) if services else None
 
         queues_fc.append({
             "title": q.customer_name,
             "start": q.start.astimezone(),
             "end": q.end.astimezone(),
             "extendedProps": {
+                "type": "Walk-in",
                 "duration": q.duration_minutes,
-                "service": service.name if service else None,
+                "service": service_names,
                 "status": q.status
             }
         })
+
+    session_db.close()
 
     combined = appointments_fc + queues_fc
     combined.sort(key=lambda x: x["start"])
@@ -1053,6 +1101,7 @@ def next_appointment():
     return jsonify({
         "appointments": combined
     })
+
 
 
 @app.route("/dashboard/appointments/current", methods=["GET"])
@@ -1076,10 +1125,19 @@ def current_appointment():
         QueueEntry.status.in_(["assigned", "in_progress"])
     ).first()
 
-    session_db.close()
-
     if appointment:
-        service = session_db.query(ProviderService).filter_by(id=appointment.service_id).first()
+        try:
+            service_ids = json.loads(appointment.services_json)
+        except:
+            service_ids = []
+
+        services = session_db.query(ProviderService).filter(
+            ProviderService.id.in_(service_ids)
+        ).all()
+
+        service_names = " + ".join([s.name for s in services]) if services else None
+
+        session_db.close()
 
         return jsonify({
             "type": "Termin",
@@ -1090,14 +1148,25 @@ def current_appointment():
                 "end": appointment.end.astimezone(),
                 "extendedProps": {
                     "duration": appointment.duration_minutes,
-                    "service": service.name,
+                    "service": service_names,
                     "status": appointment.status
                 }
             }
         })
 
     if walkin:
-        service = session_db.query(ProviderService).filter_by(id=walkin.service_id).first()
+        try:
+            service_ids = json.loads(walkin.services_json)
+        except:
+            service_ids = []
+
+        services = session_db.query(ProviderService).filter(
+            ProviderService.id.in_(service_ids)
+        ).all()
+
+        service_names = " + ".join([s.name for s in services]) if services else None
+
+        session_db.close()
 
         return jsonify({
             "type": "Walk-in",
@@ -1108,16 +1177,19 @@ def current_appointment():
                 "end": walkin.end.astimezone(),
                 "extendedProps": {
                     "duration": walkin.duration_minutes,
-                    "service": service.name,
+                    "service": service_names,
                     "status": walkin.status
                 }
             }
         })
 
+    session_db.close()
+
     return jsonify({
         "type": None,
         "data": None
     })
+
 
 
 @app.route("/dashboard/appointments/<string:type>/<int:id>/update-status", methods=["PATCH"])
@@ -1129,7 +1201,7 @@ def update_status(type, id):
     session_db = Session()
     try:
         # 1. Termin oder Walk‑in laden
-        if type == "termin":
+        if type == "Termin":
             entry = session_db.query(Appointment).filter_by(
                 id=id,
                 provider_id=current_user.id
@@ -1147,7 +1219,7 @@ def update_status(type, id):
         # 2. Status aktualisieren
         entry.status = status
 
-        if type == "walkin" and status == "completed":
+        if type == "Walk-in" and status == "completed":
             settings = session_db.query(ProviderSettings).filter_by(
                 provider_id=current_user.id
             ).first()
@@ -1208,18 +1280,30 @@ def update_status(type, id):
 def add_to_queue():
     customer_name = request.form.get("customer_name")
     phone_number = request.form.get("queue_phone")
-    service_id = request.form.get("queue_service")
+    services = request.form.getlist("services[]")
     created_at = datetime.datetime.now().strftime("%Y-%m-%dT%H:%M")
 
     session_db = Session()
     try:
-        service = session_db.query(ProviderService).filter_by(id=int(service_id)).first()
+        if not services:
+            emit_to_user("error", {"error": "Bitte mindestens einen Service auswählen."})
+            return jsonify({"error": "Kein Service ausgewählt."}), 400
 
-        if not service:
-            emit_to_user("error", {
-                "error": "Der ausgewählte Service existiert nicht."
-            })
-            return jsonify({"error": "Service nicht gefunden."}), 400
+        duration_list = []
+
+        for s in services:
+            service = session_db.query(ProviderService).filter_by(
+                id=int(s),
+                provider_id=current_user.id
+            ).first()
+
+            if not service:
+                emit_to_user("error", {
+                    "error": "Der ausgewählte Service existiert nicht."
+                })
+                return jsonify({"error": "Service nicht gefunden."}), 400
+
+            duration_list.append(service.duration_minutes)
 
         queues = session_db.query(QueueEntry).filter_by(
             provider_id=current_user.id,
@@ -1241,10 +1325,10 @@ def add_to_queue():
 
         new_queue = QueueEntry(
             provider_id=current_user.id,
-            service_id=service.id,
+            services_json=json.dumps(services),
             customer_name=customer_name,
             customer_phone=phone_number,
-            duration_minutes=service.duration_minutes,
+            duration_minutes=sum(duration_list),
             position=new_position,
             original_position=new_position,
             created_at=datetime.datetime.fromisoformat(created_at)
@@ -1286,7 +1370,11 @@ def load_queue():
         for q in queues:
             status = q.status
 
-            service = session_db.query(ProviderService).filter_by(id=q.service_id).first()
+            service = session_db.query(ProviderService).filter(
+                ProviderService.id.in_(json.loads(q.services_json))
+            ).all()
+
+            service_names = " + ".join([s.name for s in service]) if service else None
 
             # Prüfen ob assigned Zeitraum aktiv ist
             if q.start and q.end and status == "assigned":
@@ -1296,7 +1384,7 @@ def load_queue():
 
             queue.append({
                 "customer_name": q.customer_name,
-                "service": service.name,
+                "service": service_names,
                 "duration": q.duration_minutes,
                 "position": q.position,
                 "queue_id": q.id,
@@ -1436,7 +1524,7 @@ def load_appointments_for_timeline(provider_id):
             "id": a.id,
             "type": "Termin",
             "customer_name": a.customer_name,
-            "service": a.service_id,
+            "services": json.loads(a.services_json),
             "start": start,
             "end": end,
             "phone": a.customer_phone,
@@ -1451,8 +1539,7 @@ def load_appointments_for_timeline(provider_id):
 def load_queue_for_timeline(provider_id):
     session_db = Session()
 
-    queues = session_db.query(QueueEntry).options(
-    joinedload(QueueEntry.service)).filter_by(
+    queues = session_db.query(QueueEntry).filter_by(
         provider_id=provider_id,
     ).order_by(QueueEntry.position.asc()).all()
 
@@ -1466,7 +1553,7 @@ def load_queue_for_timeline(provider_id):
             "id": q.id,
             "type": "Walk-in",
             "customer_name": q.customer_name,
-            "service": q.service_id,
+            "services": json.loads(q.services_json),
             "duration": q.duration_minutes,
             "start": start,
             "end": end,
@@ -1512,7 +1599,7 @@ def build_timeline(appointments, queue):
             "id": q["id"],
             "type": "Walk-in",
             "customer_name": q["customer_name"],
-            "service": q["service"],
+            "services": q["services"],
             "start": slot_start,
             "end": slot_end,
             "phone": q["phone"],
@@ -1633,7 +1720,11 @@ def get_timeline():
 
                     session_db.commit()
 
-                service = session_db.query(ProviderService).filter_by(id=int(item["service"])).first()
+                service_ids = [int(s) for s in item["services"]]
+                services = session_db.query(ProviderService).filter(
+                    ProviderService.id.in_(service_ids)
+                ).all()
+                service_names = " + ".join([s.name for s in services]) if services else None
 
                 calendar_events.append({
                     "id": item["id"],
@@ -1643,7 +1734,8 @@ def get_timeline():
                     "color": "#1e88e5",
                     "extendedProps": {
                         "type": "Walk-in",
-                        "service": service.name,
+                        "service": service_names,
+                        "services_json": item["services"],
                         "duration": item["duration"],
                         "status": item["status"],
                         "email": None,
@@ -1653,7 +1745,11 @@ def get_timeline():
                 })
 
             else:
-                service = session_db.query(ProviderService).filter_by(id=int(item["service"])).first()
+                service_ids = [int(s) for s in item["services"]]
+                services = session_db.query(ProviderService).filter(
+                    ProviderService.id.in_(service_ids)
+                ).all()
+                service_names = " + ".join([s.name for s in services]) if services else None
 
                 calendar_events.append({
                     "id": item["id"],
@@ -1663,8 +1759,8 @@ def get_timeline():
                     "color": "#43a047",
                     "extendedProps": {
                         "type": "Termin",
-                        "service": service.name,
-                        "service_id": service.id,
+                        "service": service_names,
+                        "services_json": item["services"],
                         "duration": item["duration"],
                         "status": item["status"],
                         "email": item["email"],
@@ -2716,18 +2812,22 @@ def customer_join_queue(token):
 
         customer_name = request.form.get("customer_name", "").strip()
         customer_phone = request.form.get("customer_phone", "").strip()
-        service_id = request.form.get("service_id")
+        services = request.form.getlist("services[]")
+        duration_list = []
 
-        if not customer_name or not service_id:
+        if not customer_name or not services:
             return jsonify({"error": "Bitte Name und Service angeben."}), 400
 
-        service = session_db.query(ProviderService).filter_by(
-            id=int(service_id),
-            provider_id=settings.provider_id
-        ).first()
+        for s in services:
+            service = session_db.query(ProviderService).filter_by(
+                id=int(s),
+                provider_id=settings.provider_id
+            ).first()
 
-        if not service:
-            return jsonify({"error": "Service nicht gefunden."}), 400
+            if not service:
+                return jsonify({"error": "Service nicht gefunden."}), 400
+
+            duration_list.append(service.duration_minutes)
 
         active_count = session_db.query(QueueEntry).filter_by(
             provider_id=settings.provider_id
@@ -2742,8 +2842,8 @@ def customer_join_queue(token):
             provider_id=settings.provider_id,
             customer_name=customer_name,
             customer_phone=customer_phone,
-            service_id=service.id,
-            duration_minutes=service.duration_minutes,
+            services_json=json.dumps(services),
+            duration_minutes=sum(duration_list),
             position=active_count + 1,
             original_position=active_count + 1,
             status="pending"
@@ -2778,7 +2878,7 @@ def customer_join_queue(token):
 
     except Exception as e:
         print(e)
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Etwas ist schiefgelaufen. Bitte versuche es erneut."}), 500
 
     finally:
         session_db.close()
@@ -2842,6 +2942,18 @@ def customer_queue_status_data(token, queue_id):
             provider_id=settings.provider_id
         ).first()
 
+        appointments = load_appointments_for_timeline(settings.provider_id)
+        queue = load_queue_for_timeline(settings.provider_id)
+
+        combine = appointments + queue
+        combine.sort(key=lambda x: x["start"])
+        combine = [event for event in combine if event["status"] not in ["completed", "no_show"]]
+
+        for item in combine:
+            if item["type"] == "Walk-in":
+                if item["id"] == queue_id:
+                    entry.position_with_appointments = combine.index(item) + 1
+
         if not entry:
             return jsonify({"error": "Nicht gefunden"}), 404
 
@@ -2879,12 +2991,21 @@ def customer_queue_status_data(token, queue_id):
 
                 entry.status = "in_progress"
 
-        return jsonify({
-            "name": entry.customer_name,
-            "status": statusMap[f"{entry.status}"],
-            "position": entry.position,
-            "estimated_wait_minutes": estimated_minutes
-        }), 200
+        if not appointments:
+            return jsonify({
+                "name": entry.customer_name,
+                "status": statusMap[f"{entry.status}"],
+                "position": entry.position,
+                "estimated_wait_minutes": estimated_minutes
+            }), 200
+
+        else:
+            return jsonify({
+                "name": entry.customer_name,
+                "status": statusMap[f"{entry.status}"],
+                "position": entry.position_with_appointments,
+                "estimated_wait_minutes": estimated_minutes
+            }), 200
 
     finally:
         session_db.close()

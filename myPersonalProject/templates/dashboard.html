@@ -369,12 +369,14 @@
       display: flex;
       flex-direction: column;
     }
+
     .form-group {
       display: flex;
       flex-direction: column;
       gap: 6px;
       margin-bottom: 16px;
     }
+
     .form-group label { font-size: 14px; font-weight: 500; color: #555; }
     .form-group input,
     .form-group select,
@@ -477,7 +479,21 @@
       margin-top: 12px;
       display: none;
     }
+
     .error-msg.show { display: block; }
+
+    .checkbox-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .checkbox-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 15px;
+    }
   </style>
 </head>
 
@@ -537,14 +553,16 @@
           <input type="email" id="appointment_email" name="appointment_email" placeholder="kunde@email.de">
         </div>
         <div class="form-group">
-          <label>Service (optional)</label>
+          <label>Service</label>
           {% if services %}
-            <select id="appointment_service" name="appointment_service" required>
-              <option value="">Kein Service</option>
-              {% for s in services %}
-                <option value="{{ s.id }}">{{ s.name }} ({{ s.duration_minutes }} Min)</option>
-              {% endfor %}
-            </select>
+              <div id="appointment-service-checkboxes" class="checkbox-list">
+                  {% for s in services %}
+                      <label class="checkbox-item">
+                          <input type="checkbox" name="services[]" value="{{ s.id }}" data-duration="{{ s.duration_minutes }}">
+                          {{ s.name }} ({{ s.duration_minutes }} Min)
+                      </label>
+                  {% endfor %}
+              </div>
           {% else %}
             <p class="hint">Noch keine Services angelegt -
                 <a href="/dashboard/settings">Jetzt anlegen</a>
@@ -584,14 +602,16 @@
           <input type="tel" id="queue_phone" name="queue_phone" placeholder="0171 123456">
         </div>
         <div class="form-group">
-          <label>Service (optional)</label>
+          <label>Service</label>
           {% if services %}
-            <select id="queue_service" name="queue_service" required>
-              <option value="">Kein Service</option>
-              {% for s in services %}
-                <option value="{{ s.id }}">{{ s.name }} ({{ s.duration_minutes }} Min)</option>
-              {% endfor %}
-            </select>
+            <div id="queue-service-checkboxes" class="checkbox-list">
+                {% for s in services %}
+                    <label class="checkbox-item">
+                        <input type="checkbox" name="services[]" value="{{ s.id }}" data-duration="{{ s.duration_minutes }}">
+                        {{ s.name }} ({{ s.duration_minutes }} Min)
+                    </label>
+                {% endfor %}
+              </div>
           {% else %}
             <p class="hint">Noch keine Services angelegt –
                 <a href="/dashboard/settings#services">Jetzt anlegen</a>
@@ -833,7 +853,10 @@
         document.getElementById('appointment_phone').value = props.phone || '';
         document.getElementById('appointment_email').value = props.email || '';
         document.getElementById('appointment_notes').value = props.notes || '';
-        document.getElementById('appointment_service').value = props.service_id  || '';
+        const checkboxes = document.querySelectorAll('#appointment-service-checkboxes input[type="checkbox"]');
+        checkboxes.forEach(cb => {
+          if (props.services_json.includes(cb.value)) cb.checked = true;
+        });
 
         if (!["completed", "no_show"].includes(info.event.extendedProps.status)) {
           document.querySelectorAll('.btn-delete').forEach(btn => btn.style.display = 'block');
@@ -935,10 +958,25 @@
 
   // ── Actions ──────────────────────────────────────────────────
   async function submitForm(actionUrl, type) {
-    const select = document.getElementById("appointment_service");
-    const hasServices = select && select.options.length > 1;
+    const selectedServices = [];
+    let hasServiceInSystem = false;
 
-    if (!hasServices) {
+    if (type === 'appointment') {
+        const checkboxes = document.querySelectorAll("#appointment-service-checkboxes input[type='checkbox']:checked")
+        .forEach(cb => selectedServices.push(cb.value));
+
+        hasServicesInSystem =
+        document.querySelectorAll("#appointment-service-checkboxes input[type='checkbox']").length > 0;
+
+    } else {
+        const checkboxes = document.querySelectorAll("#queue-service-checkboxes input[type='checkbox']:checked")
+        .forEach(cb => selectedServices.push(cb.value));
+
+        hasServicesInSystem =
+        document.querySelectorAll("#appointment-service-checkboxes input[type='checkbox']").length > 0;
+    }
+
+    if (!hasServicesInSystem) {
       if (type === 'appointment') {
         if (appointmentErrorMsgTimeout == null) {
           document.getElementById("appointment-error-msg").classList.add("show");

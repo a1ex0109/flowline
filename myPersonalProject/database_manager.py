@@ -46,8 +46,6 @@ class ProviderService(Base):
     duration_minutes = Column(Integer, nullable=False)
 
     provider = relationship("Provider", back_populates="services")
-    appointments = relationship("Appointment", back_populates="service")
-    queue_entries = relationship("QueueEntry", back_populates="service")
 
 class ProviderStaff(Base):
     __tablename__ = "staff"
@@ -66,7 +64,7 @@ class Appointment(Base):
 
     id = Column(Integer, primary_key=True)
     provider_id = Column(Integer, ForeignKey("providers.id"), nullable=False)
-    service_id = Column(Integer, ForeignKey("provider_services.id"), nullable=True)
+    services_json = Column(String, nullable=True)
     staff_id = Column(Integer, ForeignKey("staff.id"), nullable=True)
     customer_name = Column(String(200))
     customer_phone = Column(String(50))
@@ -79,8 +77,7 @@ class Appointment(Base):
     reminded_24h = Column(Boolean, default=False)
     reminded_3h = Column(Boolean, default=False)
 
-    provider = relationship("Provider",        back_populates="appointments")
-    service = relationship("ProviderService", back_populates="appointments")
+    provider = relationship("Provider", back_populates="appointments")
     staff_member = relationship("ProviderStaff", back_populates="appointments")
 
 class QueueEntry(Base):
@@ -88,7 +85,7 @@ class QueueEntry(Base):
 
     id = Column(Integer, primary_key=True)
     provider_id = Column(Integer, ForeignKey("providers.id"), nullable=False)
-    service_id = Column(Integer, ForeignKey("provider_services.id"), nullable=True)
+    services_json = Column(String, nullable=True)
     staff_id = Column(Integer, ForeignKey("staff.id"), nullable=True)
     customer_name = Column(String(200))
     customer_phone = Column(String(50))
@@ -97,11 +94,11 @@ class QueueEntry(Base):
     duration_minutes = Column(Integer, nullable=False)
     position = Column(Integer, nullable=False)
     original_position = Column(Integer, nullable=False)
+    position_with_appointments = Column(Integer, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     status = Column(String(50), default="pending")
 
     provider = relationship("Provider", back_populates="queue_entries")
-    service = relationship("ProviderService", back_populates="queue_entries")
     staff_member = relationship("ProviderStaff", back_populates="queue_entries")
 
 
