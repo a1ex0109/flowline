@@ -970,7 +970,7 @@ def delete_appointment(appointment_id):
 @app.route("/dashboard/appointments/today", methods=["GET"])
 @login_required
 def appointments_today():
-    now = datetime.datetime.now().replace(second=0, microsecond=0)
+    now = datetime.datetime.now(datetime.timezone.utc).astimezone().replace(second=0, microsecond=0)
     today = now.date()
 
     day_start = datetime.datetime.combine(today, datetime.time.min)
@@ -1024,7 +1024,7 @@ def appointments_today():
 @app.route("/dashboard/appointments/next", methods=["GET"])
 @login_required
 def next_appointment():
-    now = datetime.datetime.now().replace(second=0, microsecond=0)
+    now = datetime.datetime.now(datetime.timezone.utc).astimezone().replace(second=0, microsecond=0)
 
     session_db = Session()
 
@@ -1107,7 +1107,7 @@ def next_appointment():
 @app.route("/dashboard/appointments/current", methods=["GET"])
 @login_required
 def current_appointment():
-    now = datetime.datetime.now().replace(second=0, microsecond=0)
+    now = datetime.datetime.now(datetime.timezone.utc).astimezone().replace(second=0, microsecond=0)
 
     session_db = Session()
 
@@ -1305,8 +1305,9 @@ def add_to_queue():
 
             duration_list.append(service.duration_minutes)
 
-        queues = session_db.query(QueueEntry).filter_by(
-            provider_id=current_user.id,
+        queues = session_db.query(QueueEntry).filter(
+            QueueEntry.provider_id == current_user.id,
+            QueueEntry.status.notin_(["completed", "no_show"])
         ).all()
 
         settings = session_db.query(ProviderSettings).filter_by(
@@ -1573,8 +1574,6 @@ def build_timeline(appointments, queue):
     appointments = sorted([a for a in appointments if a["status"] not in ("completed", "no_show")], key=lambda x: x["start"])
     queues = sorted([q for q in queue if q["status"] not in ("completed", "no_show")], key=lambda x: x["position"])
 
-    current_time = now
-
     session_db = Session()
 
     # 3. Walk‑ins automatisch einplanen
@@ -1582,7 +1581,7 @@ def build_timeline(appointments, queue):
         duration = datetime.timedelta(minutes=q["duration"])
 
         if  q["status"] not in ("completed", "no_show", "in_progress"):
-            slot_start = find_free_slot(current_time, duration, appointments, timeline)
+            slot_start = find_free_slot(now, duration, appointments, timeline)
             slot_end = slot_start + duration
 
             session_db.query(QueueEntry).filter_by(
@@ -1606,8 +1605,6 @@ def build_timeline(appointments, queue):
             "duration": q["duration"],
             "status": q["status"]
         })
-
-        current_time = slot_end
 
     # 4. Termine + Walk‑ins zusammenführen
     all_events = appointments + timeline
@@ -1664,10 +1661,9 @@ def get_timeline():
         events.sort(key=lambda x: x["start"])
 
         calendar_events = []
-
         for item in events:
             if item["type"] == "Termin" and item["status"] in ("pending", "confirmed", "in_progress"):
-                if item["end"] < now:
+                if item["end"] <= now:
                     session_db.query(Appointment).filter(
                         Appointment.provider_id == provider_id,
                         Appointment.id == item["id"]
@@ -1689,13 +1685,15 @@ def get_timeline():
 
 
             elif item["type"] == "Walk-in" and item["status"] in ("assigned", "in_progress"):
-                if item["end"] < now:
+                print(item["end"], now, item["end"] < now)
+                if item["end"] <= now:
                     session_db.query(QueueEntry).filter(
                         QueueEntry.provider_id == provider_id,
                         QueueEntry.id == item["id"]
                     ).update({QueueEntry.status: "completed"})
 
                     session_db.commit()
+                    print("auf completed gesetzt!")
 
                     item["status"] = "completed"
 
@@ -2376,7 +2374,7 @@ def reminder_worker():
     while True:
         session_db = Session()
         try:
-            now = datetime.datetime.now(datetime.timezone.utc)
+            now = datetime.datetime.now(datetime.timezone.utc).astimezone().replace(microsecond=0, second=0)
             in_24h = now + datetime.timedelta(hours=24)
             in_3h = now + datetime.timedelta(hours=3)
 
@@ -2874,6 +2872,8 @@ def customer_join_queue(token):
 
         session_db.commit()
 
+        socketio.emit("queue_updated", {"message": f"{customer_name} hat sich über QR-Code in die Warteschlange eingetragen."}, room=f"provider_{settings.provider_id}")
+
         return jsonify({"queue_id": queue_id}), 200
 
     except Exception as e:
@@ -2967,7 +2967,7 @@ def customer_queue_status_data(token, queue_id):
         if entry.start:
             start_aware = entry.start.astimezone()
             end_aware = entry.end.astimezone()
-            now = datetime.datetime.now().astimezone().replace(second=0, microsecond=0)
+            now = datetime.datetime.now(datetime.timezone.utc).astimezone().replace(second=0, microsecond=0)
             diff_seconds = (start_aware - now).total_seconds()
             estimated_minutes = max(round(int(diff_seconds) / 60), 0)
 

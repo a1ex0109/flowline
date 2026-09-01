@@ -537,8 +537,8 @@
       </div>
       <form id="appointment-form" onsubmit="submitForm('/dashboard/appointments', 'appointment'); return false;">
         <div class="form-group">
-          <label for="customer_name">Kundenname (optional, aber empfohlen)</label>
-          <input type="text" id="customer_name" name="customer_name" placeholder="Kundenname">
+          <label for="appointment_customer_name">Kundenname (optional, aber empfohlen)</label>
+          <input type="text" id="appointment_customer_name" name="customer_name" placeholder="Kundenname">
         </div>
         <div class="form-group">
           <label for="appointment_datetime">Datum & Uhrzeit</label>
@@ -594,8 +594,8 @@
       </div>
       <form id="queue-form" onsubmit="submitForm('/dashboard/queue/add', 'queue'); return false;">
         <div class="form-group">
-          <label for="customer_name">Kundenname (optional, aber empfohlen)</label>
-          <input type="text" id="customer_name" name="customer_name" placeholder="Kundenname">
+          <label for="queue_customer_name">Kundenname (optional, aber empfohlen)</label>
+          <input type="text" id="queue_customer_name" name="customer_name" placeholder="Kundenname">
         </div>
         <div class="form-group">
           <label for="queue_phone">Telefon (optional)</label>
@@ -833,7 +833,7 @@
 
       dateClick(info) {
         document.querySelectorAll('.btn-delete').forEach(btn => btn.style.display = 'none');
-        document.getElementById('customer_name').value = '';
+        document.getElementById('appointment_customer_name').value = '';
         document.getElementById('appointment_datetime').value = info.dateStr.slice(0, 16) || '';
         document.getElementById('appointment_phone').value = '';
         document.getElementById('appointment_email').value = '';
@@ -848,7 +848,7 @@
         currentAppointmentId = info.event.id;
         document.getElementById('modal-title').textContent = 'Termin bearbeiten';
         document.getElementById('appointment-form').setAttribute('onsubmit', `submitForm('/dashboard/appointments/${info.event.id}/edit'); return false;`);
-        document.getElementById('customer_name').value = info.event.title || '';
+        document.getElementById('appointment_customer_name').value = info.event.title || '';
         document.getElementById('appointment_datetime').value = info.event.startStr.slice(0, 16) || '';
         document.getElementById('appointment_phone').value = props.phone || '';
         document.getElementById('appointment_email').value = props.email || '';
@@ -928,6 +928,20 @@
 
   socket.on("connect", () => {
      socket.emit("join_room", { room: "{{ room_id }}" });
+  });
+
+  socket.on("queue_updated", (data) => {
+    document.getElementById("message").textContent = data.message;
+    const popup = document.getElementById("message-popup");
+    if (popup && popupTimeout == null) {
+      popup.classList.add("show");
+      popupTimeout = setTimeout(() => {
+        popupTimeout = null;
+        popup.classList.remove("show")
+        }, 5000
+      );
+    }
+    state.calendar.refetchEvents();
   });
 
   socket.on("message", (data) => {
@@ -1043,8 +1057,14 @@
 
     const diff = nextChange - now;
 
+    if (diff <= 0) {
+      sidebarTimeout = null;
+      return;
+    }
+
     sidebarTimeout = setTimeout(() => {
       sidebarTimeout = null;
+      console.log("Ausgeführt");
       state.calendar.refetchEvents();
     }, diff);
   }
@@ -1270,15 +1290,17 @@
   }
 
   function closeNewAppointmentModal() {
-    const services = document.getElementById('appointment_service')
+    const checkboxes = document.querySelectorAll('#appointment-service-checkboxes input[type="checkbox"]')
 
-    if (services) {
-      services.value = '';
+    if (checkboxes) {
+      checkboxes.forEach(cb => {
+        cb.checked = false;
+      });
     }
 
     document.getElementById('modal-title').textContent = 'Neuer Termin';
     document.getElementById('appointment-form').setAttribute('onsubmit', `submitForm('/dashboard/appointments'); return false;`);
-    document.getElementById('customer_name').value = '';
+    document.getElementById('appointment_customer_name').value = '';
     document.getElementById('appointment_datetime').value = '';
     document.getElementById('appointment_phone').value = '';
     document.getElementById('appointment_email').value = '';
@@ -1307,13 +1329,15 @@
     document.getElementById('queue-modal').classList.remove('flex');
     document.getElementById('queue-modal').classList.add('hidden');
 
-    const services = document.getElementById('queue_service')
+    const checkboxes = document.querySelectorAll('#queue-service-checkboxes input[type="checkbox"]')
 
-    if (services) {
-      services.value = '';
+    if (checkboxes) {
+      checkboxes.forEach(cb => {
+        cb.checked = false;
+      });
     }
 
-    document.getElementById('customer_name').value = '';
+    document.getElementById('queue_customer_name').value = '';
     document.getElementById('queue_phone').value = '';
 
   }
