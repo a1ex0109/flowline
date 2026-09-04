@@ -587,6 +587,7 @@ def appointments():
     provider_id = current_user.id
 
     customer_name = request.form.get("customer_name")
+
     start_datetime = datetime.datetime.fromisoformat(
         request.form.get("appointment_datetime")
     ).astimezone() # str -> datetime
@@ -596,11 +597,13 @@ def appointments():
     phone_number = request.form.get("appointment_phone")
     customer_email = request.form.get("appointment_email")
     services = request.form.getlist("services[]")
+    custom_duration = request.form.get("custom_duration")
+
     notes = request.form.get("appointment_notes")
 
     session_db = Session()
     try:
-        if not services:
+        if not services and not custom_duration:
             emit_to_user("error", {
                 "error": "Bitte mindestens einen Service auswählen."
             })
@@ -619,6 +622,8 @@ def appointments():
                 return jsonify({"error": "Service nicht gefunden."}), 400
 
             duration_list.append(service.duration_minutes)
+
+        duration_list.append(int(custom_duration))
 
         total_duration = sum(duration_list)
         end_datetime = (start_datetime + datetime.timedelta(minutes=total_duration)).astimezone()
@@ -640,6 +645,7 @@ def appointments():
                 duration_minutes=total_duration,
                 notes=notes,
                 services_json=json.dumps(services),
+                custom_duration=custom_duration if custom_duration else None,
                 status="pending"
             )
 
@@ -682,12 +688,13 @@ def edit_appointment(appointment_id):
     customer_email = request.form.get("appointment_email")
 
     services = request.form.getlist("services[]")
+    custom_duration = request.form.get("custom_duration")
 
     notes = request.form.get("appointment_notes")
 
     session_db = Session()
     try:
-        if not services:
+        if not services or not custom_duration:
             emit_to_user("error", {"error": "Bitte mindestens einen Service auswählen."})
             return jsonify({"error": "Kein Service ausgewählt."}), 400
 
@@ -704,6 +711,8 @@ def edit_appointment(appointment_id):
                 return jsonify({"error": "Service nicht gefunden."}), 400
 
             duration_list.append(service.duration_minutes)
+
+        duration_list.append(int(custom_duration))
 
         total_duration = sum(duration_list)
         end_datetime = (start_datetime + datetime.timedelta(minutes=total_duration)).astimezone()
@@ -741,6 +750,7 @@ def edit_appointment(appointment_id):
         appointment.notes = notes
 
         appointment.services_json = json.dumps(services)
+        appointment.custom_duration = custom_duration
 
         appointment.status = current_status
 
@@ -996,10 +1006,13 @@ def appointments_today():
             ProviderService.id.in_(service_ids)
         ).all()
 
-        if services:
-            service_names = " + ".join([s.name for s in services])
-        else:
-            service_names = None
+        service_names = " + ".join([s.name for s in services]) if services else None
+
+        if a.custom_duration:
+            if service_names:
+                service_names += f" + Custom ({a.custom_duration} Min)"
+            else:
+                service_names = f"Custom ({a.custom_duration} Min)"
 
         appointments_fc.append({
             "title": a.customer_name,
@@ -1049,6 +1062,12 @@ def next_appointment():
 
         service_names = " + ".join([s.name for s in services]) if services else None
 
+        if a.custom_duration:
+            if service_names:
+                service_names += f" + Custom ({a.custom_duration} Min)"
+            else:
+                service_names = f"Custom ({a.custom_duration} Min)"
+
         appointments_fc.append({
             "title": a.customer_name,
             "start": a.start.astimezone(),
@@ -1080,6 +1099,12 @@ def next_appointment():
         ).all()
 
         service_names = " + ".join([s.name for s in services]) if services else None
+
+        if q.custom_duration:
+            if service_names:
+                service_names += f" + Custom ({q.custom_duration} Min)"
+            else:
+                service_names = f"Custom ({q.custom_duration} Min)"
 
         queues_fc.append({
             "title": q.customer_name,
@@ -1137,6 +1162,12 @@ def current_appointment():
 
         service_names = " + ".join([s.name for s in services]) if services else None
 
+        if appointment.custom_duration:
+            if service_names:
+                service_names += f" + Custom ({appointment.custom_duration} Min)"
+            else:
+                service_names = f"Custom ({appointment.custom_duration} Min)"
+
         session_db.close()
 
         return jsonify({
@@ -1165,6 +1196,12 @@ def current_appointment():
         ).all()
 
         service_names = " + ".join([s.name for s in services]) if services else None
+
+        if walkin.custom_duration:
+            if service_names:
+                service_names += f" + Custom ({walkin.custom_duration} Min)"
+            else:
+                service_names = f"Custom ({walkin.custom_duration} Min)"
 
         session_db.close()
 
@@ -1281,11 +1318,12 @@ def add_to_queue():
     customer_name = request.form.get("customer_name")
     phone_number = request.form.get("queue_phone")
     services = request.form.getlist("services[]")
+    custom_duration = request.form.get("custom_duration")
     created_at = datetime.datetime.now().strftime("%Y-%m-%dT%H:%M")
 
     session_db = Session()
     try:
-        if not services:
+        if not services and not custom_duration:
             emit_to_user("error", {"error": "Bitte mindestens einen Service auswählen."})
             return jsonify({"error": "Kein Service ausgewählt."}), 400
 
@@ -1304,6 +1342,8 @@ def add_to_queue():
                 return jsonify({"error": "Service nicht gefunden."}), 400
 
             duration_list.append(service.duration_minutes)
+
+        duration_list.append(int(custom_duration))
 
         queues = session_db.query(QueueEntry).filter(
             QueueEntry.provider_id == current_user.id,
@@ -1327,6 +1367,7 @@ def add_to_queue():
         new_queue = QueueEntry(
             provider_id=current_user.id,
             services_json=json.dumps(services),
+            custom_duration=custom_duration if custom_duration else None,
             customer_name=customer_name,
             customer_phone=phone_number,
             duration_minutes=sum(duration_list),
@@ -1375,7 +1416,13 @@ def load_queue():
                 ProviderService.id.in_(json.loads(q.services_json))
             ).all()
 
-            service_names = " + ".join([s.name for s in service]) if service else None
+            service_names = " + ".join([s.name for s in service]) if service else ""
+
+            if q.custom_duration:
+                if service_names:
+                    service_names += f" + Custom ({q.custom_duration} Min)"
+                else:
+                    service_names = f"Custom ({q.custom_duration} Min)"
 
             # Prüfen ob assigned Zeitraum aktiv ist
             if q.start and q.end and status == "assigned":
@@ -1526,6 +1573,7 @@ def load_appointments_for_timeline(provider_id):
             "type": "Termin",
             "customer_name": a.customer_name,
             "services": json.loads(a.services_json),
+            "custom_duration": a.custom_duration,
             "start": start,
             "end": end,
             "phone": a.customer_phone,
@@ -1555,6 +1603,7 @@ def load_queue_for_timeline(provider_id):
             "type": "Walk-in",
             "customer_name": q.customer_name,
             "services": json.loads(q.services_json),
+            "custom_duration": q.custom_duration,
             "duration": q.duration_minutes,
             "start": start,
             "end": end,
@@ -1599,6 +1648,7 @@ def build_timeline(appointments, queue):
             "type": "Walk-in",
             "customer_name": q["customer_name"],
             "services": q["services"],
+            "custom_duration": q["custom_duration"],
             "start": slot_start,
             "end": slot_end,
             "phone": q["phone"],
@@ -1693,7 +1743,6 @@ def get_timeline():
                     ).update({QueueEntry.status: "completed"})
 
                     session_db.commit()
-                    print("auf completed gesetzt!")
 
                     item["status"] = "completed"
 
@@ -1724,6 +1773,12 @@ def get_timeline():
                 ).all()
                 service_names = " + ".join([s.name for s in services]) if services else None
 
+                if item["custom_duration"]:
+                    if service_names:
+                        service_names += f" + Custom ({item['custom_duration']} Min)"
+                    else:
+                        service_names = f"Custom ({item['custom_duration']} Min)"
+
                 calendar_events.append({
                     "id": item["id"],
                     "title": item["customer_name"],
@@ -1734,6 +1789,7 @@ def get_timeline():
                         "type": "Walk-in",
                         "service": service_names,
                         "services_json": item["services"],
+                        "custom_duration": item["custom_duration"],
                         "duration": item["duration"],
                         "status": item["status"],
                         "email": None,
@@ -1749,6 +1805,12 @@ def get_timeline():
                 ).all()
                 service_names = " + ".join([s.name for s in services]) if services else None
 
+                if item["custom_duration"]:
+                    if service_names:
+                        service_names += f" + Custom ({item['custom_duration']} Min)"
+                    else:
+                        service_names = f"Custom ({item['custom_duration']} Min)"
+
                 calendar_events.append({
                     "id": item["id"],
                     "title": item["customer_name"],
@@ -1759,6 +1821,7 @@ def get_timeline():
                         "type": "Termin",
                         "service": service_names,
                         "services_json": item["services"],
+                        "custom_duration": item["custom_duration"],
                         "duration": item["duration"],
                         "status": item["status"],
                         "email": item["email"],

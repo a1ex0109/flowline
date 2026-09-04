@@ -479,20 +479,26 @@
       margin-top: 12px;
       display: none;
     }
-
     .error-msg.show { display: block; }
-
     .checkbox-list {
       display: flex;
       flex-direction: column;
+      max-height: 240px;
+      overflow-y: auto;
       gap: 8px;
     }
-
     .checkbox-item {
       display: flex;
       align-items: center;
       gap: 8px;
       font-size: 15px;
+    }
+    .no-form-style {
+      margin-left: 8px;
+      border: 1px solid #ccc !important;
+      background: #fff !important;
+      padding: 6px 10px !important;
+      box-shadow: none !important;
     }
   </style>
 </head>
@@ -562,6 +568,16 @@
                           {{ s.name }} ({{ s.duration_minutes }} Min)
                       </label>
                   {% endfor %}
+
+                  <label class="checkbox-item">
+                    <input type="checkbox" value="custom" id="appointmentCustomServiceCheckbox">
+                    Sonstiges (benutzerdefinierte Dauer)
+                  </label>
+
+                  <div id="appointmentCustomDurationBox" class="hidden mt-2">
+                    <label>Dauer (Minuten):</label>
+                    <input class="no-form-style" type="number" id="appointmentCustomDurationInput" min="1" max="300" placeholder="z.B. 12">
+                  </div>
               </div>
           {% else %}
             <p class="hint">Noch keine Services angelegt -
@@ -611,7 +627,17 @@
                         {{ s.name }} ({{ s.duration_minutes }} Min)
                     </label>
                 {% endfor %}
-              </div>
+
+                <label class="checkbox-item">
+                  <input type="checkbox" value="custom" id="queueCustomServiceCheckbox">
+                  Sonstiges (benutzerdefinierte Dauer)
+                </label>
+
+                <div id="queueCustomDurationBox" class="hidden mt-2">
+                  <label>Dauer (Minuten):</label>
+                  <input class="no-form-style" type="number" id="queueCustomDurationInput" min="1" max="300" placeholder="z.B. 12">
+                </div>
+            </div>
           {% else %}
             <p class="hint">Noch keine Services angelegt –
                 <a href="/dashboard/settings#services">Jetzt anlegen</a>
@@ -758,6 +784,20 @@
     return close;
   }
 
+  const appointmentCustomCheckbox = document.getElementById("appointmentCustomServiceCheckbox");
+  const appointmentCustomBox = document.getElementById("appointmentCustomDurationBox");
+
+  appointmentCustomCheckbox.addEventListener("change", () => {
+      appointmentCustomBox.style.display = appointmentCustomCheckbox.checked ? "block" : "none";
+  });
+
+  const queueCustomCheckbox = document.getElementById("queueCustomServiceCheckbox");
+  const queueCustomBox = document.getElementById("queueCustomDurationBox");
+
+  queueCustomCheckbox.addEventListener("change", () => {
+      queueCustomBox.style.display = queueCustomCheckbox.checked ? "block" : "none";
+  });
+
   // ── FullCalendar ────────────────────────────────────────────
   document.addEventListener("DOMContentLoaded", async () => {
     const res = await fetch("/dashboard/settings/get_provider_profile");
@@ -845,9 +885,16 @@
         if (info.event.extendedProps.type === 'Walk-in') return;
 
         const props = info.event.extendedProps;
+
+        if (props.custom_duration) {
+            document.getElementById('appointmentCustomServiceCheckbox').checked = true;
+            document.getElementById('appointmentCustomDurationInput').value = props.custom_duration;
+            appointmentCustomBox.style.display = 'block';
+        }
+
         currentAppointmentId = info.event.id;
         document.getElementById('modal-title').textContent = 'Termin bearbeiten';
-        document.getElementById('appointment-form').setAttribute('onsubmit', `submitForm('/dashboard/appointments/${info.event.id}/edit'); return false;`);
+        document.getElementById('appointment-form').setAttribute('onsubmit', `submitForm('/dashboard/appointments/${info.event.id}/edit', 'appointment'); return false;`);
         document.getElementById('appointment_customer_name').value = info.event.title || '';
         document.getElementById('appointment_datetime').value = info.event.startStr.slice(0, 16) || '';
         document.getElementById('appointment_phone').value = props.phone || '';
@@ -972,24 +1019,32 @@
 
   // ── Actions ──────────────────────────────────────────────────
   async function submitForm(actionUrl, type) {
-    const selectedServices = [];
+    let customDuration = null;
     let hasServiceInSystem = false;
 
     if (type === 'appointment') {
         const checkboxes = document.querySelectorAll("#appointment-service-checkboxes input[type='checkbox']:checked")
-        .forEach(cb => selectedServices.push(cb.value));
+        .forEach(cb => {
+            if (cb.value === "custom") {
+              customDuration = document.getElementById("appointmentCustomDurationInput").value;
+            }
+        });
 
         hasServicesInSystem =
         document.querySelectorAll("#appointment-service-checkboxes input[type='checkbox']").length > 0;
 
     } else {
         const checkboxes = document.querySelectorAll("#queue-service-checkboxes input[type='checkbox']:checked")
-        .forEach(cb => selectedServices.push(cb.value));
+        .forEach(cb => {
+            if (cb.value === "custom") {
+              customDuration = document.getElementById("queueCustomDurationInput").value;
+            }
+        });
 
         hasServicesInSystem =
-        document.querySelectorAll("#appointment-service-checkboxes input[type='checkbox']").length > 0;
+        document.querySelectorAll("#queue-service-checkboxes input[type='checkbox']").length > 0;
     }
-
+    console.log(hasServicesInSystem, document.querySelectorAll("#queue-service-checkboxes input[type='checkbox']"));
     if (!hasServicesInSystem) {
       if (type === 'appointment') {
         if (appointmentErrorMsgTimeout == null) {
@@ -1013,17 +1068,16 @@
       return;
     }
 
-    let form;
-
-    if (actionUrl === '/dashboard/appointments') {
-      form = document.querySelector("#appointment-form");
-    } else if (actionUrl === '/dashboard/queue/add') {
-      form = document.querySelector("#queue-form");
-    } else {
-      form = document.querySelector("#appointment-form");
-    }
+    let form = type === "appointment"
+      ? document.querySelector("#appointment-form")
+      : document.querySelector("#queue-form");
 
     const formData = new FormData(form);
+
+    if (customDuration !== null) {
+        formData.append("custom_duration", customDuration);
+    }
+    console.log(formData.get("appointment_datetime"));
     const res = await fetch(actionUrl, { method: "POST", body: formData });
 
     if (res.ok) {
@@ -1298,8 +1352,12 @@
       });
     }
 
+    document.getElementById('appointmentCustomServiceCheckbox').checked = false;
+    document.getElementById('appointmentCustomDurationInput').value = '';
+    appointmentCustomBox.style.display = 'none';
+
     document.getElementById('modal-title').textContent = 'Neuer Termin';
-    document.getElementById('appointment-form').setAttribute('onsubmit', `submitForm('/dashboard/appointments'); return false;`);
+    document.getElementById('appointment-form').setAttribute('onsubmit', `submitForm('/dashboard/appointments', 'appointment'); return false;`);
     document.getElementById('appointment_customer_name').value = '';
     document.getElementById('appointment_datetime').value = '';
     document.getElementById('appointment_phone').value = '';
@@ -1337,9 +1395,12 @@
       });
     }
 
+    document.getElementById('queueCustomServiceCheckbox').checked = false;
+    document.getElementById('queueCustomDurationInput').value = '';
+    queueCustomBox.style.display = 'none';
+
     document.getElementById('queue_customer_name').value = '';
     document.getElementById('queue_phone').value = '';
-
   }
 
   function toggleMenu() {

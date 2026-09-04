@@ -882,7 +882,7 @@
             <input type="text" placeholder="Name z.B. Bartpflege" value="${service.name}">
           </div>
           <div class="service-duration" style="flex:1;">
-            <input type="number" placeholder="Dauer (Min)" value="${service.duration}">
+            <input type="number" placeholder="Dauer (Min)" value="${service.duration}" min="1" max="300">
           </div>
           <button onclick="this.closest('.service-row').remove()" style="background:none;border:none;color:#9ca3af;cursor:pointer;font-size:18px;padding:0 4px;">✕</button>
         </div>
