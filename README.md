@@ -114,10 +114,11 @@ Not another enterprise platform with a 60-page onboarding guide — a focused to
 | Settings page | ✅ Done |
 | SQLAlchemy ORM migration | ✅ Done |
 | Onboarding flow | ✅ Done |
-| QR self-registration | 🚧 In progress |
-| SMS reminders | 📋 Planned |
+| QR self-registration | ✅ Done |
+| SMS reminders | ✅ Done |
 | Analytics dashboard | 📋 Planned |
 | Multi-staff support | 📋 Planned |
+| Bug fix | 📋 Planned |
 
 ---
 
