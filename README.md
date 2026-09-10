@@ -34,8 +34,7 @@ Not a tutorial project — a complete SaaS system built from scratch.
 - ➕ Walk-in management — add customers manually or let them self-register via QR code  
 - 🔔 No-show prevention — automated reminders at 1 week, 1 day, and 3 hours  
 - ✅ Smart status tracking — pending → confirmed → in progress → completed / no-show  
-- ⚙️ Settings — change email/password with verification codes, manage services, delete account  
-- 🔐 GDPR-aligned — credentials stored separately from business data  
+- ⚙️ Settings — change email/password with verification codes, manage services, delete account   
 
 ## 👤 For the customer
 - 📲 QR check-in — scan, enter name & service, join instantly  
