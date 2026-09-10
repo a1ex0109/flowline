@@ -20,192 +20,9 @@
       padding: 24px;
     }
 
-    .container {
-      width: 100%;
-      max-width: 560px;
-      margin: auto;
-    }
-
-    /* Logo */
-    .logo {
-      font-size: 22px;
-      font-weight: 700;
-      color: #2d6a4f;
-      margin-bottom: 32px;
-      letter-spacing: -0.3px;
-    }
-
-    /* Steps indicator */
-    .steps {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      margin-bottom: 32px;
-    }
-    .step {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      font-size: 13px;
-      color: #9ca3af;
-    }
-    .step.active { color: #2d6a4f; font-weight: 600; }
-    .step.done { color: #9ca3af; }
-    .step-dot {
-      width: 24px;
-      height: 24px;
-      border-radius: 50%;
-      background: #e5e7eb;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 11px;
-      font-weight: 700;
-      color: #9ca3af;
-      flex-shrink: 0;
-    }
-    .step.active .step-dot {
-      background: #2d6a4f;
-      color: white;
-    }
-    .step.done .step-dot {
-      background: #d1fae5;
-      color: #2d6a4f;
-    }
-    .step-line {
-      flex: 1;
-      height: 1px;
-      background: #e5e7eb;
-    }
-
-    /* Card */
-    .card {
-      background: white;
-      border-radius: 16px;
-      padding: 36px;
-      box-shadow: 0 1px 4px rgba(0,0,0,0.06);
-    }
-
-    .card-header {
-      margin-bottom: 28px;
-    }
-    .card-header h1 {
-      font-size: 22px;
-      font-weight: 700;
-      color: #111827;
-      letter-spacing: -0.4px;
-      margin-bottom: 6px;
-    }
-    .card-header p {
-      font-size: 14px;
-      color: #6b7280;
-      line-height: 1.5;
-    }
-
-    /* Service rows */
-    .services-list {
-      display: flex;
-      flex-direction: column;
-      gap: 10px;
-      margin-bottom: 12px;
-    }
-
-    .service-row {
-      display: grid;
-      grid-template-columns: 1fr 120px 36px;
-      gap: 8px;
-      align-items: center;
-      animation: fadeIn 0.18s ease;
-    }
-
     @keyframes fadeIn {
       from { opacity: 0; transform: translateY(-6px); }
       to   { opacity: 1; transform: translateY(0); }
-    }
-
-    .service-row input {
-      width: 100%;
-      padding: 10px 13px;
-      border: 1.5px solid #e5e7eb;
-      border-radius: 8px;
-      font-size: 14px;
-      color: #111827;
-      background: #fafafa;
-      outline: none;
-      transition: border-color 0.15s;
-    }
-    .service-row input:focus {
-      border-color: #2d6a4f;
-      background: white;
-    }
-    .service-row input::placeholder { color: #9ca3af; }
-
-    .duration-wrap {
-      position: relative;
-    }
-    .duration-wrap input {
-      padding-right: 36px;
-    }
-    .duration-unit {
-      position: absolute;
-      right: 11px;
-      top: 50%;
-      transform: translateY(-50%);
-      font-size: 12px;
-      color: #9ca3af;
-      pointer-events: none;
-    }
-
-    .btn-remove {
-      width: 36px;
-      height: 36px;
-      border: none;
-      background: none;
-      color: #d1d5db;
-      cursor: pointer;
-      border-radius: 6px;
-      font-size: 18px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      transition: color 0.15s, background 0.15s;
-      flex-shrink: 0;
-    }
-    .btn-remove:hover { color: #ef4444; background: #fef2f2; }
-
-    /* Add service button */
-    .btn-add {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      font-size: 13px;
-      font-weight: 500;
-      color: #2d6a4f;
-      background: none;
-      border: none;
-      cursor: pointer;
-      padding: 6px 0;
-      margin-bottom: 28px;
-      transition: opacity 0.15s;
-    }
-    .btn-add:hover { opacity: 0.7; }
-    .btn-add-icon {
-      width: 22px;
-      height: 22px;
-      border-radius: 50%;
-      background: #d1fae5;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 15px;
-      line-height: 1;
-    }
-
-    /* Divider */
-    .divider {
-      height: 1px;
-      background: #f3f4f6;
-      margin-bottom: 24px;
     }
 
     /* Submit button */
@@ -228,44 +45,10 @@
     .btn-primary:hover { background: #245c44; }
     .btn-primary:active { transform: scale(0.99); }
     .btn-primary:disabled { background: #9ca3af; cursor: not-allowed; }
-
-    /* Error */
-    .error-msg {
-      font-size: 13px;
-      color: #ef4444;
-      margin-top: 12px;
-      display: none;
-    }
-    .error-msg.show { display: block; }
-
-    /* Column labels */
-    .col-labels {
-      display: grid;
-      grid-template-columns: 1fr 120px 36px;
-      gap: 8px;
-      margin-bottom: 8px;
-    }
-    .col-label {
-      font-size: 11px;
-      font-weight: 600;
-      color: #9ca3af;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-      padding-left: 2px;
-    }
-
-    hint {
-      font-size: 12px;
-      color: #9ca3af;
-      margin-bottom: 20px;
-      line-height: 1.5;
-    }
-
-    .hint strong { color: #6b7280; }
   </style>
 </head>
 <body>
-  <div class="container">
+  <div class="ob-container">
     <div class="logo">Flowline</div>
 
     <!-- Steps -->
@@ -282,6 +65,11 @@
       <div class="step-line"></div>
       <div class="step">
         <div class="step-dot">3</div>
+        <span>Mitarbeiter festlegen</span>
+      </div>
+      <div class="step-line"></div>
+      <div class="step">
+        <div class="step-dot">4</div>
         <span>Fertig</span>
       </div>
     </div>
@@ -325,7 +113,7 @@
       </p>
 
       <button class="btn-primary" id="submit-btn" onclick="finishOnboarding()">
-        Weiter zum Dashboard →
+        Weiter zur Mitarbeiterauswahl →
       </button>
 
       <div class="error-msg" id="error-msg">
@@ -341,13 +129,6 @@
           <a href="#" style="color:#6b7280;text-decoration:underline;">Datenschutz</a>
       </div>
       <div>© 2026 <a href="#" style="color:#6b7280;text-decoration:underline;">Flowline</a>. Alle Rechte vorbehalten.</div>
-  </div>
-
-  <div id="message-popup" class="popup">
-      <div id="message" class="message"></div>
-  </div>
-  <div id="error-popup" class="popup">
-      <div id="error" class="error"></div>
   </div>
 </body>
 <script>

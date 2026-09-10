@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+  <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+  <title>Einrichtung – Flowline</title>
+  <style>
+    * { box-sizing: border-box; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #f0f2ee;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(-6px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    /* Submit button */
+    .btn-primary {
+      width: 100%;
+      padding: 13px;
+      background: #2d6a4f;
+      color: white;
+      border: none;
+      border-radius: 10px;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.15s, transform 0.1s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+    .btn-primary:hover { background: #245c44; }
+    .btn-primary:active { transform: scale(0.99); }
+    .btn-primary:disabled { background: #9ca3af; cursor: not-allowed; }
+  </style>
+</head>
+<body>
+
+<div class="ob-container">
+  <div class="logo">Flowline</div>
+
+  <!-- Steps -->
+  <div class="steps">
+    <div class="step done">
+      <div class="step-dot">✓</div>
+      <span>Konto</span>
+    </div>
+    <div class="step-line"></div>
+    <div class="step done">
+      <div class="step-dot">✓</div>
+      <span>Services</span>
+    </div>
+    <div class="step-line"></div>
+    <div class="step active">
+      <div class="step-dot">3</div>
+      <span>Mitarbeiter festlegen</span>
+    </div>
+    <div class="step-line"></div>
+    <div class="step">
+      <div class="step-dot">4</div>
+      <span>Fertig</span>
+    </div>
+  </div>
+
+  <!-- Card -->
+  <div class="card">
+    <div class="card-header">
+      <h1>Arbeitest du im Team?</h1>
+      <p>Füge deine Kolleg:innen hinzu, damit Termine und Walk-ins ihnen zugeordnet werden können.</p>
+    </div>
+
+    <!-- Column labels -->
+    <div class="col-labels">
+      <span class="col-label">Name</span>
+      <span class="col-label"></span>
+    </div>
+
+    <!-- Staff rows -->
+    <div class="services-list" id="staff-list">
+      <div class="service-row">
+        <input type="text" class="staff-name" placeholder="z.B. Anna">
+        <button class="btn-remove" onclick="removeRow(this)" tabindex="-1">×</button>
+      </div>
+    </div>
+
+    <!-- Add row -->
+    <button class="btn-add" onclick="addRow()">
+      <span class="btn-add-icon">+</span>
+      Weitere Person hinzufügen
+    </button>
+
+    <div class="divider"></div>
+
+    <p class="hint">
+      <strong>Tipp:</strong> Du kannst dein Team jederzeit unter Einstellungen → Mitarbeiter bearbeiten oder ergänzen.
+    </p>
+
+    <button class="btn-primary" id="submit-btn" onclick="finishStaffOnboarding()">
+      Weiter zum Dashboard →
+    </button>
+
+    <button class="btn-skip" onclick="skipStaffOnboarding()">
+      Ich arbeite allein – Überspringen
+    </button>
+
+    <div class="error-msg" id="error-msg">
+      Bitte gib mindestens einen Namen ein oder überspringe diesen Schritt.
+    </div>
+  </div>
+
+  <div style="text-align:center;font-size:12px;color:#9ca3af;margin-top:16px;">
+      <div style="margin-bottom:6px;">
+          <a href="#" style="color:#6b7280;text-decoration:underline;">Nutzungsbedingungen</a>
+          <span style="margin:0 6px;">|</span>
+          <a href="#" style="color:#6b7280;text-decoration:underline;">Datenschutz</a>
+      </div>
+      <div>© 2026 <a href="#" style="color:#6b7280;text-decoration:underline;">Flowline</a>. Alle Rechte vorbehalten.</div>
+  </div>
+</div>
+</body>
+<script>
+  function addRow() {
+    const list = document.getElementById("staff-list");
+    const row = document.createElement("div");
+    row.classList.add("service-row");
+    row.innerHTML = `
+      <input type="text" class="staff-name" placeholder="z.B. Max">
+      <button class="btn-remove" onclick="removeRow(this)" tabindex="-1">×</button>
+    `;
+    list.appendChild(row);
+    row.querySelector(".staff-name").focus();
+  }
+
+  function removeRow(btn) {
+    const rows = document.querySelectorAll(".service-row");
+    if (rows.length === 1) return; // mindestens eine Zeile behalten
+    btn.closest(".service-row").remove();
+  }
+
+  async function submitStaff(names) {
+    const errorMsg = document.getElementById("error-msg");
+    errorMsg.classList.remove("show");
+
+    const btn = document.getElementById("submit-btn");
+    btn.disabled = true;
+    btn.textContent = "Wird gespeichert...";
+
+    const res = await fetch("/onboarding/staff", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ staff: names })
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      window.location.href = data.redirect;
+    } else {
+      btn.disabled = false;
+      btn.textContent = "Weiter zum Dashboard →";
+      errorMsg.textContent = "Fehler beim Speichern. Bitte versuche es erneut.";
+      errorMsg.classList.add("show");
+    }
+  }
+
+  function finishStaffOnboarding() {
+    const names = [...document.querySelectorAll(".staff-name")]
+      .map(i => i.value.trim())
+      .filter(n => n);
+    submitStaff(names);
+  }
+
+  function skipStaffOnboarding() {
+    submitStaff([]);
+  }
+</script>
+</html>

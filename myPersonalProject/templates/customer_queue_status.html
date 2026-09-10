@@ -40,7 +40,8 @@
             letter-spacing: -0.4px;
         }
 
-        .provider-name {
+        .provider-name,
+        .provider-address {
             text-align: center;
             font-size: 13px;
             color: #6b7280;
@@ -220,6 +221,7 @@
         <div class="logo">Flowline</div>
     </div>
     <div class="provider-name">{{ provider.business_name }}</div>
+    <div class="provider-address">{{ provider.street }}, {{ provider.postal_code }} {{ provider.city }}</div>
 
     <div class="card">
         <div class="live-header" id="live-header">
@@ -307,7 +309,6 @@
 
             const positionLabel = data.position === 2 ? "Du bist als Nächstes dran" : "Personen vor dir";
             const positionNumber = data.position === 2 ? "" : data.position - 1;
-            console.log(data.position, positionNumber);
 
             document.getElementById("status-container").innerHTML = `
                 <div class="position-hero">

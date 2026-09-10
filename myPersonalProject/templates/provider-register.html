@@ -48,8 +48,18 @@
                 </div>
 
                 <div class="form-group">
-                    <label for="address">Adresse</label>
-                    <input type="text" id="address" name="address" placeholder="Musterstraße 1, 74523 Schwäbisch Hall" required>
+                    <label for="street">Straße + Hausnummer</label>
+                    <input type="text" id="street" name="street" placeholder="Straße + Hausnummer" required>
+                </div>
+
+                <div class="form-group">
+                    <label for="postal_code">Postleitzahl</label>
+                    <input type="text" id="postal_code" name="postal_code" placeholder="PLZ" required>
+                </div>
+
+                <div class="form-group">
+                    <label for="city">Ort</label>
+                    <input type="text" id="city" name="city" placeholder="Ort" required>
                 </div>
 
                 <div class="form-group">
@@ -111,7 +121,9 @@ async function submitForm(actionUrl) {
   const business_name = document.getElementById("business_name");
   const category = document.getElementById("category");
   const email = document.getElementById("email");
-  const address = document.getElementById("address");
+  const street = document.getElementById("street");
+  const postal_code = document.getElementById("postal_code");
+  const city = document.getElementById("city");
   const password = document.getElementById("password");
   const password_repeat = document.getElementById("password_repeat");
   const formData = new FormData();
@@ -120,7 +132,9 @@ async function submitForm(actionUrl) {
   formData.append("business_name", business_name.value)
   formData.append("category", category.value)
   formData.append("email", email.value);
-  formData.append("address", address.value);
+  formData.append("street", street.value);
+  formData.append("postal_code", postal_code.value);
+  formData.append("city", city.value);
   formData.append("password", password.value);
   formData.append("password_repeat", password_repeat.value);
 
@@ -128,12 +142,19 @@ async function submitForm(actionUrl) {
     method: "POST",
     body: formData
   })
+  const data = await res.json();
 
   if (res.ok) {
-      const res1 = await fetch("/register/provider/code/send", { method: "POST" })
+      sessionStorage.setItem("reg_token", data.reg_token);
+      const res1 = await fetch("/register/provider/code/send",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reg_token: data.reg_token })
+      })
 
       if (res1.ok) {
-        window.location.href = "/register/provider/code";
+        window.location.href = `/register/provider/code?reg_token=${data.reg_token}`;
       } else {
         const data = await res1.json().catch(() => null);
         console.log(data?.error);

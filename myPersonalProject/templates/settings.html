@@ -140,7 +140,8 @@
 
     /* ── Form Row ── */
     .form-row,
-    .service-row {
+    .service-row,
+    .staff-row {
       display: flex;
       align-items: center;
       padding: 16px 24px;
@@ -149,6 +150,7 @@
     }
     .form-row:last-child,
     .service-row:last-child { border-bottom: none; }
+    .staff-row:last-child { border-bottom: none; }
     .form-row-label {
       flex: 0 0 180px;
       font-size: 13px;
@@ -157,11 +159,13 @@
     }
     .form-row-value,
     .service-name,
+    .staff-name,
     .service-duration { flex: 1; }
     .form-row-value input,
     .form-row-value select,
     .service-name input,
-    .service-duration input {
+    .service-duration input,
+    .staff-name input {
       width: 100%;
       padding: 9px 13px;
       border: 1px solid #d1d5db;
@@ -176,6 +180,7 @@
     .form-row-value input:focus,
     .form-row-value select:focus,
     .service-name input:focus,
+    .staff-name input:focus,
     .service-duration input:focus {
       border-color: #43a047;
       box-shadow: 0 0 0 3px rgba(67,160,71,0.15);
@@ -474,6 +479,9 @@
     <a class="nav-item" onclick="showPane('services')" href="#">
       <i class="fa-solid fa-scissors"></i> Services
     </a>
+    <a class="nav-item" onclick="showPane('staff')" href="#">
+      <i class="fa-solid fa-user-group"></i> Personal
+    </a>
     <a class="nav-item" onclick="showPane('qr')" href="#">
       <i class="fa-solid fa-qrcode"></i> Queue QR-Code
     </a>
@@ -526,8 +534,9 @@
         <div class="form-row">
           <div class="form-row-label">Adresse</div>
           <div class="form-row-value">
-            <input type="text" id="address" placeholder="Musterstraße 1, 74523 Schwäbisch Hall">
-            <div class="hint">Optional – wird auf der Kunden-Eintragsseite angezeigt.</div>
+            <input type="text" class="mb-4" id="street" placeholder="Straße + Hausnummer (z.B. Musterstraße 12)">
+            <input type="text" class="mb-4" id="postal_code" placeholder="PLZ (z.B. 74523)">
+            <input type="text" id="city" placeholder="Ort (z.B. Schwäbisch Hall)">
           </div>
         </div>
         <div class="section-footer">
@@ -681,6 +690,36 @@
         <div class="form-row">
           <button type="button" onclick="addService()" style="background:none;border:1px dashed #d1d5db;border-radius:8px;padding:8px 16px;font-size:13px;color:#6b7280;cursor:pointer;font-family:'DM Sans',sans-serif;display:flex;align-items:center;gap:6px;">
             <i class="fa-solid fa-plus" style="font-size:11px;"></i> Service hinzufügen
+          </button>
+        </div>
+
+        <div class="section-footer">
+          <button class="btn-save">Speichern</button>
+        </div>
+      </form>
+    </div>
+
+    <div class="pane" id="pane-staff">
+      <div class="page-title">Personal</div>
+      <div class="page-subtitle">Verwalte die Mitarbeiter in deinem Salon.</div>
+
+      <form class="section-card" onsubmit="saveStaffMembers(); return false;">
+        <div class="section-header">
+          <div class="section-header-icon"><i class="fa-solid fa-user-group"></i></div>
+          <div>
+            <div class="section-title">Dein Team</div>
+            <div class="section-desc">Diese Mitarbeiter stehen beim Erstellen von Terminen und Walk-ins zur Auswahl</div>
+          </div>
+        </div>
+
+        <div id="staff-list">
+
+        </div>
+
+        <div class="form-row">
+          <button type="button" onclick="addStaffMember()"
+            style="background:none;border:1px dashed #d1d5db;border-radius:8px;padding:8px 16px;font-size:13px;color:#6b7280;cursor:pointer;font-family:'DM Sans',sans-serif;display:flex;align-items:center;gap:6px;">
+            <i class="fa-solid fa-plus" style="font-size:11px;"></i> Mitarbeiter hinzufügen
           </button>
         </div>
 
@@ -863,7 +902,9 @@
 
     document.getElementById("business_name").value = data?.business_name;
     document.getElementById("category").value = data?.category;
-    document.getElementById("address").value = data?.address;
+    document.getElementById("street").value = data?.street;
+    document.getElementById("postal_code").value = data?.postal_code;
+    document.getElementById("city").value = data?.city;
     document.getElementById("email").value = data?.email;
     document.getElementById("reminder24").checked = data?.reminder_24h;
     document.getElementById("reminder3").checked = data?.reminder_3h;
@@ -885,6 +926,18 @@
             <input type="number" placeholder="Dauer (Min)" value="${service.duration}" min="1" max="300">
           </div>
           <button onclick="this.closest('.service-row').remove()" style="background:none;border:none;color:#9ca3af;cursor:pointer;font-size:18px;padding:0 4px;">✕</button>
+        </div>
+      `;
+    });
+
+    data.staff.forEach(staff => {
+      document.getElementById("staff-list").innerHTML += `
+        <div class="staff-row">
+          <div class="staff-name flex-none w-1/2">
+            <input type="text" placeholder="Name z.B. Anna" value="${staff.name}">
+          </div>
+          <button onclick="this.closest('.staff-row').remove()"
+            class="remove-btn">✕</button>
         </div>
       `;
     });
@@ -935,10 +988,10 @@
     const row = document.createElement('div');
     row.className = 'service-row';;
     row.innerHTML = `
-      <div class="service-name" style="flex:2;">
+      <div class="service-name" style="flex:2">
         <input type="text" placeholder="Name z.B. Bartpflege">
       </div>
-      <div class="service-duration" style="flex:1;">
+      <div class="service-duration" style="flex:1">
         <input type="number" placeholder="Dauer (Min)">
       </div>
       <button onclick="this.closest('.service-row').remove()" style="background:none;border:none;color:#9ca3af;cursor:pointer;font-size:18px;padding:0 4px;">✕</button>
@@ -947,10 +1000,24 @@
     row.querySelector('input').focus();
   }
 
+  function addStaffMember() {
+    const list = document.getElementById('staff-list');
+    const row = document.createElement('div');
+    row.className = 'staff-row';;
+    row.innerHTML = `
+      <div class="staff-name flex-none w-1/2">
+        <input type="text" placeholder="Name z.B. Anna">
+      </div>
+      <button onclick="this.closest('.staff-row').remove()" style="background:none;border:none;color:#9ca3af;cursor:pointer;font-size:18px;padding:0 4px;">✕</button>
+    `;
+    list.appendChild(row);
+    row.querySelector('input').focus();
+  }
+
   async function saveProviderServices() {
     const serviceRows = document.querySelectorAll(".service-row");
     const services = [];
-    console.log(serviceRows);
+
 
     serviceRows.forEach(row => {
         const name = row.querySelector(".service-name input").value.trim();
@@ -972,6 +1039,30 @@
         console.log(data?.error);
     }
   }
+
+  async function saveStaffMembers() {
+    const staffRows = document.querySelectorAll(".staff-row");
+    const staff = [];
+
+    staffRows.forEach(row => {
+        const name = row.querySelector(".staff-name input").value.trim();
+        if (name) {
+            staff.push({ name: name });
+        }
+    });
+
+    const res = await fetch("/dashboard/settings/staff/save", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ staff: staff })
+    });
+
+    if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        console.log(data?.error);
+    }
+  }
+
 
   function copyUrl() {
     const url = document.getElementById("qr-url").textContent;
@@ -1094,7 +1185,9 @@
 
     formData.append("business_name", business_name.value);
     formData.append("category", category.value);
-    formData.append("address", address.value);
+    formData.append("street", street.value);
+    formData.append("postal_code", postal_code.value);
+    formData.append("city", city.value);
 
     const res = await fetch('/dashboard/settings/save_business_info', {
       method: 'POST',

@@ -69,9 +69,9 @@
         }
 
         .form-group label {
-            font-size: 16px;
+            font-size: 14px;
             font-weight: 500;
-            color: #333;
+            color: #555;
         }
 
         .form-group input,
@@ -168,6 +168,19 @@
             gap: 8px;
             font-size: 15px;
         }
+
+        .no-form-style {
+          margin-left: 8px;
+          border: 1px solid #ccc !important;
+          background: #fff !important;
+          padding: 6px 10px !important;
+          box-shadow: none !important;
+        }
+
+        #queueCustomDurationInput {
+            width: 100px;
+        }
+
     </style>
 </head>
 <body>
@@ -202,21 +215,29 @@
         </div>
 
         <div class="form-group">
-            <label for="service-checkboxes">Service</label>
-            <div id="service-checkboxes" class="checkbox-list">
+            <label for="queue-service-checkboxes">Service</label>
+            <div id="queue-service-checkboxes" class="checkbox-list">
                 {% for s in service %}
                     <label class="checkbox-item">
                         <input type="checkbox" value="{{ s.id }}" data-duration="{{ s.duration_minutes }}">
                         {{ s.name }} ({{ s.duration_minutes }} Min)
                     </label>
                 {% endfor %}
+
+                <label class="checkbox-item">
+                    <input type="checkbox" value="custom" id="queueCustomServiceCheckbox">
+                    Sonstiges (benutzerdefinierte Dauer)
+                </label>
+
+                <div id="queueCustomDurationBox" style="display:none;margin-top:8px;">
+                    <label>Dauer (Minuten):</label>
+                    <input class="no-form-style" type="number" id="queueCustomDurationInput" min="1" max="300" placeholder="z.B. 12">
+                </div>
             </div>
+            <button class="btn-primary" id="submit-btn" onclick="joinQueue()">
+                Jetzt eintragen →
+            </button>
         </div>
-
-        <button class="btn-primary" id="submit-btn" onclick="joinQueue()">
-            Jetzt eintragen →
-        </button>
-
         <div class="error-msg" id="error-msg"></div>
 
         {% endif %}
@@ -233,21 +254,71 @@
 </div>
 
 <script>
+    const queueCustomCheckbox = document.getElementById("queueCustomServiceCheckbox");
+    const queueCustomBox = document.getElementById("queueCustomDurationBox");
+
+    queueCustomCheckbox.addEventListener("change", () => {
+        queueCustomBox.style.display = queueCustomCheckbox.checked ? "block" : "none";
+    });
+
     async function joinQueue() {
         const selectedServices = [];
         const name = document.getElementById("customer_name").value.trim();
         const phone = document.getElementById("customer_phone").value.trim();
-        const checkboxes = document.querySelectorAll("#service-checkboxes input[type='checkbox']:checked");
         const errorMsg = document.getElementById("error-msg");
 
+        let customDuration = null;
+        let hasServiceInSystem = false;
+
+        const checkboxes = document.querySelectorAll("#queue-service-checkboxes input[type='checkbox']:checked")
+
         checkboxes.forEach(cb => {
-          if (cb.checked) selectedServices.push(cb.value);
+            if (!cb.checked) return;
+
+            if (cb.value === "custom") {
+              customDuration = document.getElementById("queueCustomDurationInput").value;
+            } else {
+                selectedServices.push(cb.value);
+            }
         });
+
+        console.log(checkboxes);
+
+        hasServicesInSystem =
+        document.querySelectorAll("#queue-service-checkboxes input[type='checkbox']").length > 0;
+
+        if (!hasServicesInSystem) {
+          if (type === 'appointment') {
+            if (appointmentErrorMsgTimeout == null) {
+              document.getElementById("appointment-error-msg").classList.add("show");
+              appointmentErrorMsgTimeout = setTimeout(() => {
+                appointmentErrorMsgTimeout = null;
+                document.getElementById("appointment-error-msg").classList.remove("show")
+                }, 10000
+              );
+            }
+          } else {
+            if (queueErrorMsgTimeout == null) {
+              document.getElementById("queue-error-msg").classList.add("show");
+              queueErrorMsgTimeout = setTimeout(() => {
+                queueErrorMsgTimeout = null;
+                document.getElementById("queue-error-msg").classList.remove("show")
+                }, 10000
+              );
+            }
+          }
+          return;
+        }
 
 
         if (!name || selectedServices.length === 0) {
-          errorMsg.textContent = "Bitte Name und Service ausfüllen.";
+          errorMsg.textContent = "Bitte Name und Services ausfüllen.";
           errorMsg.classList.add("show");
+
+          setTimeout(() => {
+            errorMsg.classList.remove("show")
+          }, 5000);
+
           return;
         }
 
@@ -261,6 +332,10 @@
         formData.append("customer_name", name);
         formData.append("customer_phone", phone);
         selectedServices.forEach(s => formData.append("services[]", s));
+
+        if (customDuration !== null) {
+            formData.append("custom_duration", customDuration);
+        }
 
         try {
           const res = await fetch("/queue/{{ token }}/join", {
@@ -277,12 +352,20 @@
               btn.textContent = "Jetzt eintragen →";
               errorMsg.textContent = data.error || "Ein Fehler ist aufgetreten.";
               errorMsg.classList.add("show");
+
+              setTimeout(() => {
+                errorMsg.classList.remove("show")
+              }, 5000);
           }
         } catch (e) {
           btn.disabled = false;
           btn.textContent = "Jetzt eintragen →";
           errorMsg.textContent = "Verbindungsfehler. Bitte versuche es erneut.";
           errorMsg.classList.add("show");
+
+          setTimeout(() => {
+            errorMsg.classList.remove("show")
+          }, 5000);
         }
     }
 </script>

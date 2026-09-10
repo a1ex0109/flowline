@@ -29,7 +29,7 @@
     </div>
   </div>
 
-  <div style="text-align:center;font-size:12px;color:#9ca3af;margin-top:auto;">
+  <div style="text-align:center;font-size:12px;color:#9ca3af;margin-top:16px;margin-bottom:16px;">
       <div style="margin-bottom:6px;">
           <a href="#" style="color:#6b7280;text-decoration:underline;">Nutzungsbedingungen</a>
           <span style="margin:0 6px;">|</span>
@@ -103,6 +103,8 @@
     const formData = new FormData();
 
     formData.append("verification_code", verification_code.value);
+    formData.append("reg_token", sessionStorage.getItem("reg_token"));
+    formData.append("reset_token", sessionStorage.getItem("reset_token"));
 
     const res = await fetch(actionUrl, {
       method: "POST",

@@ -15,7 +15,9 @@ class Provider(Base):
     business_name = Column(String(200), nullable=False)
     owner_name = Column(String(200), nullable=False)
     category = Column(String(100), nullable=False)
-    address = Column(String(300))
+    street = Column(String(300))
+    postal_code = Column(String(20))
+    city = Column(String(120))
     created_at = Column(DateTime, default=datetime.utcnow)
 
     credentials = relationship("ProviderCredentials", back_populates="provider")

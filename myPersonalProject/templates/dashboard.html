@@ -576,7 +576,7 @@
 
                   <div id="appointmentCustomDurationBox" class="hidden mt-2">
                     <label>Dauer (Minuten):</label>
-                    <input class="no-form-style" type="number" id="appointmentCustomDurationInput" min="1" max="300" placeholder="z.B. 12">
+                    <input class="no-form-style" type="number" id="appointmentCustomDurationInput" min="1" max="300" placeholder="z.B. 1">
                   </div>
               </div>
           {% else %}
@@ -635,7 +635,7 @@
 
                 <div id="queueCustomDurationBox" class="hidden mt-2">
                   <label>Dauer (Minuten):</label>
-                  <input class="no-form-style" type="number" id="queueCustomDurationInput" min="1" max="300" placeholder="z.B. 12">
+                  <input class="no-form-style" type="number" id="queueCustomDurationInput" min="1" max="300" placeholder="z.B. 1">
                 </div>
             </div>
           {% else %}
@@ -1044,7 +1044,7 @@
         hasServicesInSystem =
         document.querySelectorAll("#queue-service-checkboxes input[type='checkbox']").length > 0;
     }
-    console.log(hasServicesInSystem, document.querySelectorAll("#queue-service-checkboxes input[type='checkbox']"));
+
     if (!hasServicesInSystem) {
       if (type === 'appointment') {
         if (appointmentErrorMsgTimeout == null) {
@@ -1077,7 +1077,6 @@
     if (customDuration !== null) {
         formData.append("custom_duration", customDuration);
     }
-    console.log(formData.get("appointment_datetime"));
     const res = await fetch(actionUrl, { method: "POST", body: formData });
 
     if (res.ok) {

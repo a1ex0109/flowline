@@ -33,6 +33,8 @@ login_manager.login_view = "provider_login_page"
 TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID")
 TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN")
 TWILIO_PHONE_NUMBER = os.getenv("TWILIO_PHONE_NUMBER")
+registration_data = {}
+password_reset_data = {}
 
 @login_manager.user_loader
 def user_loader(user_id):
@@ -110,18 +112,25 @@ def provider_register_submit():
     owner_name = request.form.get("owner_name")
     business_name = request.form.get("business_name")
     category = request.form.get("category")
-    address = request.form.get("address")
+    street = request.form.get("street")
+    postal_code = request.form.get("postal_code")
+    city = request.form.get("city")
     password = request.form.get("password")
     confirm_password = request.form.get("password_repeat")
 
-    session["registration_data"] = {
+
+    reg_token = secrets.token_urlsafe(16)
+    registration_data[reg_token] = {
         "email": email,
         "owner_name": owner_name,
         "business_name": business_name,
         "category": category,
-        "address": address,
+        "street": street,
+        "postal_code": postal_code,
+        "city": city,
         "password": password,
-        "password_repeat": confirm_password
+        "password_repeat": confirm_password,
+        "created_at": time.time()
     }
 
     session_db = Session()
@@ -140,7 +149,7 @@ def provider_register_submit():
             })
             return jsonify({"error": "E‑Mail-Adresse ist bereits registriert."}), 400
 
-        return jsonify({"message": "Registrierungsdaten sind gültig."}), 200
+        return jsonify({"message": "Registrierungsdaten sind gültig.", "reg_token": reg_token}), 200
 
     except Exception as e:
         emit_to_user("message", {"message": str(e)})
@@ -151,7 +160,9 @@ def provider_register_submit():
 
 @app.route("/register/provider/code", methods=["GET"])
 def register_provider_code_page():
-    if "registration_data" not in session:
+    reg_token = request.args.get("reg_token")
+
+    if reg_token not in registration_data:
         return redirect(url_for("provider-register"))
 
     return render_template("verify-code.html", submit_url="/register/provider/code/verify", resend_url="/register/provider/code/send", room_id=session.get("room_id"))
@@ -159,14 +170,12 @@ def register_provider_code_page():
 
 @app.route("/register/provider/code/send", methods=["POST", "GET"])
 def register_provider_code_send():
-    email = session.get("register_email")
+    data = request.get_json()
+    reg_token = data.get("reg_token")
+    reg_data = registration_data.get(reg_token)
 
-    if not email:
-        registration_data = session.get("registration_data")
-        if not registration_data:
-            emit_to_user("error", {"error": "Keine Registrierungsdaten vorhanden."})
-            return jsonify({"error": "Keine Registrierungsdaten vorhanden."}), 400
-        email = registration_data.get("email")
+    if not reg_data:
+        return jsonify({"error": "Der Registrierungsprozess ist abgelaufen. Bitte starte die Registrierung erneut."}), 400
 
     SMTP_SERVER = "smtp.gmail.com"
     SMTP_PORT = 587
@@ -174,9 +183,11 @@ def register_provider_code_send():
     YOUR_APP_PASSWORD = os.getenv("SMTP_PASSWORD")
 
     try:
-        session["register_email"] = email
-        session["register_code"] = "".join(random.choices("0123456789", k=4))
-        session["register_expires"] = time.time() + 300
+        email = reg_data["email"]
+        code = "".join(random.choices("0123456789", k=4))
+
+        registration_data[reg_token]["code"] = code
+        registration_data[reg_token]["expires"] = time.time() + 300
 
         text_fallback = f'''
 Hallo,
@@ -185,7 +196,7 @@ du hast versucht, ein neues Konto auf unserer Terminplattform zu erstellen.
 
 Dein Bestätigungscode lautet:
 
-{session.get("register_code")}
+{code}
 
 Bitte gib diesen Code auf der Verifizierungsseite ein, um deine Registrierung abzuschließen.
 
@@ -211,7 +222,7 @@ Das Flowline-Team
               <h1 style="font-size:22px;font-weight:700;color:#111827;margin:0 0 12px;letter-spacing:-0.4px;">Dein Bestätigungscode</h1>
               <p style="font-size:14px;color:#6b7280;line-height:1.6;margin:0 0 32px;">Um deine Registrierung bei Flowline abzuschließen, gib bitte den folgenden Code ein.</p>
               <div style="background:#f0f2ee;border-radius:12px;padding:28px;text-align:center;margin:0 0 32px;">
-                <span style="font-size:36px;font-weight:700;color:#2d6a4f;letter-spacing:12px;">{session.get("register_code")}</span>
+                <span style="font-size:36px;font-weight:700;color:#2d6a4f;letter-spacing:12px;">{code}</span>
               </div>
               <p style="font-size:13px;color:#9ca3af;margin:0 0 32px;">Dieser Code läuft in <strong style="color:#6b7280;">5 Minuten</strong> ab.</p>
               <hr style="border:none;border-top:1px solid #f3f4f6;margin:0 0 24px;">
@@ -247,38 +258,45 @@ Das Flowline-Team
         return jsonify({"error": "Die E‑Mail konnte nicht zugestellt werden."}), 500
 
 
-@app.route("/register/provider/code/verify", methods=["POST", "GET"])
+@app.route("/register/provider/code/verify", methods=["POST"])
 def register_provider_code_verify():
     code = request.form.get("verification_code")
+    reg_token = request.form.get("reg_token")
 
-    data = session.get("registration_data")
-    verif_code = session.get("register_code")
-    expires = session.get("register_expires")
+    if not reg_token or reg_token not in registration_data:
+        emit_to_user("error", {
+            "error": "Der Registrierungsprozess ist abgelaufen. Bitte starte die Registrierung erneut."
+        })
+        return jsonify(
+            {"error": "Der Registrierungsprozess ist abgelaufen."}), 400
 
-    if not data or not verif_code or not expires:
-        emit_to_user("error", {"error": "Der Code ist abgelaufen. Bitte starte die Registrierung erneut."})
-        return jsonify({"error": "Code abgelaufen."}), 400
+    verif_code = registration_data[reg_token]["code"]
+    expires = registration_data[reg_token]["expires"]
+
+    #if expires is None or verif_code is None:
+        #registration_data.pop(reg_token, None)
+        #return jsonify({"error": "Code abgelaufen."}), 400
 
     if time.time() > expires:
         emit_to_user("error", {"error": "Der Code ist abgelaufen. Bitte starte die Registrierung erneut."})
-        session.pop("registration_data", None)
-        session.pop("register_code", None)
-        session.pop("register_expires", None)
+        registration_data.pop(reg_token, None)
         return jsonify({"error": "Code abgelaufen."}), 400
 
     if code != verif_code:
         emit_to_user("error", {"error": "Dieser Code stimmt nicht. Bitte überprüfe deine Eingabe."})
         return jsonify({"error": "Der Verifizierungscode ist falsch."}), 400
 
-    password_hash = bcrypt.generate_password_hash(data["password"]).decode()
+    password_hash = bcrypt.generate_password_hash(registration_data[reg_token]["password"]).decode()
 
     session_db = Session()
 
     new_provider = Provider(
-        owner_name=data["owner_name"],
-        business_name=data["business_name"],
-        category=data["category"],
-        address=data["address"]
+        owner_name=registration_data[reg_token]["owner_name"],
+        business_name=registration_data[reg_token]["business_name"],
+        category=registration_data[reg_token]["category"],
+        street=registration_data[reg_token]["street"],
+        postal_code=registration_data[reg_token]["postal_code"],
+        city=registration_data[reg_token]["city"],
     )
 
     session_db.add(new_provider)
@@ -286,7 +304,7 @@ def register_provider_code_verify():
 
     new_credentials = ProviderCredentials(
         provider_id=new_provider.id,
-        email=data["email"],
+        email=registration_data[reg_token]["email"],
         password_hash=password_hash
     )
 
@@ -310,19 +328,19 @@ def register_provider_code_verify():
 
     staff = ProviderStaff(
         provider_id=new_provider.id,
-        name=data["owner_name"],
+        name=registration_data[reg_token]["owner_name"],
         is_owner=True,
     )
 
     session_db.add(staff)
     session_db.commit()
 
+    user_obj = User(new_provider.id, registration_data[reg_token]["email"])
+    login_user(user_obj)
+
     session_db.close()
 
-    session.pop("registration_data", None)
-    session.pop("register_code", None)
-    session.pop("register_expires", None)
-
+    registration_data.pop(reg_token, None)
     return jsonify({"message": "Verifizierung erfolgreich."}), 200
 
 @app.route("/onboarding", methods=["GET", "POST"])
@@ -356,13 +374,41 @@ def onboarding():
 
         session_db.commit()
 
+        return jsonify({"redirect": "/onboarding/staff"}), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+    finally:
+        session_db.close()
+
+
+@app.route("/onboarding/staff", methods=["GET", "POST"])
+@login_required
+def onboarding_staff():
+    if request.method == "GET":
+        return render_template("onboarding_staff.html")
+
+    session_db = Session()
+    try:
+        data = request.get_json()
+        staff_members = data.get("staff", [])
+
+        for name in staff_members:
+            name = name.strip()
+            if not name:
+                continue
+            session_db.add(ProviderStaff(
+                provider_id=current_user.id,
+                name=name,
+                is_owner=False
+            ))
+
+            session_db.commit()
+
         return jsonify({"redirect": "/dashboard"}), 200
 
     except Exception as e:
-        print(e)
-        emit_to_user("error", {
-            "error": "Beim Erstellen des Termins ist ein Fehler aufgetreten.",
-        })
         return jsonify({"error": str(e)}), 500
 
     finally:
@@ -381,25 +427,19 @@ def password_reset_verify_code():
 
 @app.route("/password-reset/verify", methods=["POST"])
 def password_reset_verify():
-    reset_id = str(uuid.uuid4())
-    session["reset_id"] = reset_id
-
     reset_email_address = request.form.get("email")
+    reset_token = request.form.get("reset_token")
 
-    verification_code = "".join(random.choices("0123456789", k=4))
+    if not reset_token or reset_token not in password_reset_data:
+        reset_token = secrets.token_urlsafe(16)
 
-    if reset_email_address:
-        session["reset_email"] = reset_email_address
+    email = reset_email_address or password_reset_data.get(reset_token, {}).get("email")
 
-    email = session.get("reset_email")
-    session["reset_code"] = verification_code
-    session["reset_expires"] = time.time() + 300
-
+    if not email:
+        return jsonify({"error": "E‑Mail fehlt."}), 400
 
     session_db = Session()
-
     creds = session_db.query(ProviderCredentials).filter_by(email=email).first()
-
     session_db.close()
 
     if not creds:
@@ -407,6 +447,15 @@ def password_reset_verify():
             "error": "Zu dieser E‑Mail existiert kein Konto."
         })
         return jsonify({"error": "Kein Konto mit dieser E‑Mail gefunden."}), 400
+
+    verification_code = "".join(random.choices("0123456789", k=4))
+
+    password_reset_data[reset_token] = {
+        "email": email,
+        "code": verification_code,
+        "expires": time.time() + 300,
+        "created_at": time.time()
+    }
 
     SMTP_SERVER = "smtp.gmail.com"
     SMTP_PORT = 587
@@ -473,17 +522,25 @@ Flowline-Team
     emit_to_user("message", {
         "message": "Der Bestätigungscode wurde versendet."
     })
-    return jsonify({"message": "Der Bestätigungscode wurde versendet."}), 200
+    return jsonify({"message": "Der Bestätigungscode wurde versendet.", "reset_token": reset_token}), 200
 
 @app.route("/password-reset/check-password", methods=["POST", "GET"])
 def passwort_reset_check():
     code = request.form.get("verification_code")
 
-    reset_code = session.get("reset_code")
-    reset_email = session.get("reset_email")
-    expires = session.get("reset_expires")
+    reset_token = request.form.get("reset_token")
 
-    if not reset_code or not reset_email or not expires:
+    if not reset_token or reset_token not in password_reset_data:
+        emit_to_user("error", {
+            "error": "Die Passwort‑Zurücksetzung ist abgelaufen. Bitte starte erneut."
+        })
+        return jsonify({"error": "Die Passwort‑Zurücksetzung ist abgelaufen."}), 400
+
+    email = password_reset_data[reset_token]["email"]
+    reset_code = password_reset_data[reset_token]["code"]
+    expires = password_reset_data[reset_token]["expires"]
+
+    if not email or not reset_code or not expires:
         emit_to_user("error", {
             "error": "Dein Code ist abgelaufen. Bitte beginne den Vorgang erneut."
         })
@@ -493,9 +550,7 @@ def passwort_reset_check():
         emit_to_user("error", {
             "error": "Dein Code ist abgelaufen. Bitte beginne den Vorgang erneut."
         })
-        session.pop("reset_code", None)
-        session.pop("reset_email", None)
-        session.pop("reset_expires", None)
+        password_reset_data.pop(reset_token, None)
         return jsonify({"error": "Code abgelaufen."}), 400
 
     if code == reset_code:
@@ -505,7 +560,6 @@ def passwort_reset_check():
         "error": "Dieser Code stimmt nicht. Bitte überprüfe deine Eingabe."
     })
     return jsonify({"error": "Code ist ungültig."}), 400
-
 
 
 @app.route("/password-update", methods=["POST", "GET"])
@@ -519,11 +573,19 @@ def password_update_confirm():
     password = request.form.get("password")
     password_repeat = request.form.get("password_repeat")
 
-    reset_email = session.get("reset_email")
-    reset_code = session.get("reset_code")
-    expires = session.get("reset_expires")
+    reset_token = request.form.get("reset_token")
 
-    if not reset_email or not reset_code or not expires:
+    if not reset_token or reset_token not in password_reset_data:
+        emit_to_user("error", {
+            "error": "Die Passwort‑Zurücksetzung ist abgelaufen. Bitte starte erneut."
+        })
+        return jsonify({"error": "Die Passwort‑Zurücksetzung ist abgelaufen."}), 400
+
+    email = password_reset_data[reset_token]["email"]
+    reset_code = password_reset_data[reset_token]["code"]
+    expires = password_reset_data[reset_token]["expires"]
+
+    if not email or not reset_code or not expires:
         emit_to_user("error", {
             "error": "Die Passwort‑Zurücksetzung ist abgelaufen. Bitte starte erneut."
         })
@@ -533,9 +595,7 @@ def password_update_confirm():
         emit_to_user("error", {
             "error": "Die Passwort‑Zurücksetzung ist abgelaufen. Bitte starte erneut."
         })
-        session.pop("reset_email", None)
-        session.pop("reset_code", None)
-        session.pop("reset_expires", None)
+        password_reset_data.pop(reset_token, None)
         return jsonify({"error": "Passwort‑Zurücksetzung abgelaufen."}), 400
 
     if password != password_repeat:
@@ -547,7 +607,7 @@ def password_update_confirm():
 
     session_db = Session()
 
-    creds = session_db.query(ProviderCredentials).filter_by(email=reset_email).first()
+    creds = session_db.query(ProviderCredentials).filter_by(email=email).first()
 
     if bcrypt.check_password_hash(creds.password_hash, password):
         emit_to_user("error", {
@@ -563,14 +623,15 @@ def password_update_confirm():
 
     session_db.close()
 
-    session.pop("reset_email", None)
-    session.pop("reset_code", None)
-    session.pop("reset_expires", None)
+    password_reset_data.pop(reset_token, None)
 
     return jsonify({"message": "Passwort wurde erfolgreich aktualisiert."}), 200
 
 @app.route("/dashboard")
 def dashboard():
+    if not current_user.is_authenticated:
+        return redirect("/login")
+
     session_db = Session()
 
     services = session_db.query(ProviderService).filter_by(
@@ -597,16 +658,17 @@ def appointments():
     phone_number = request.form.get("appointment_phone")
     customer_email = request.form.get("appointment_email")
     services = request.form.getlist("services[]")
-    custom_duration = request.form.get("custom_duration")
-
+    custom_duration = request.form.get("custom_duration", None)
     notes = request.form.get("appointment_notes")
 
     session_db = Session()
     try:
-        if not services and not custom_duration:
-            emit_to_user("error", {
-                "error": "Bitte mindestens einen Service auswählen."
-            })
+        if custom_duration == "":
+            emit_to_user("error", {"error": "Bitte eine gültige Dauer eingeben."})
+            return jsonify({"error": "Custom-Dauer fehlt."}), 400
+
+        if not services and custom_duration is None:
+            emit_to_user("error", {"error": "Bitte mindestens einen Service auswählen."})
             return jsonify({"error": "Kein Service ausgewählt."}), 400
 
         duration_list = []
@@ -623,7 +685,8 @@ def appointments():
 
             duration_list.append(service.duration_minutes)
 
-        duration_list.append(int(custom_duration))
+        if custom_duration:
+            duration_list.append(int(custom_duration))
 
         total_duration = sum(duration_list)
         end_datetime = (start_datetime + datetime.timedelta(minutes=total_duration)).astimezone()
@@ -1318,12 +1381,16 @@ def add_to_queue():
     customer_name = request.form.get("customer_name")
     phone_number = request.form.get("queue_phone")
     services = request.form.getlist("services[]")
-    custom_duration = request.form.get("custom_duration")
+    custom_duration = request.form.get("custom_duration", None)
     created_at = datetime.datetime.now().strftime("%Y-%m-%dT%H:%M")
 
     session_db = Session()
     try:
-        if not services and not custom_duration:
+        if custom_duration == "":
+            emit_to_user("error", {"error": "Bitte eine gültige Dauer eingeben."})
+            return jsonify({"error": "Custom-Dauer fehlt."}), 400
+
+        if not services and custom_duration is None:
             emit_to_user("error", {"error": "Bitte mindestens einen Service auswählen."})
             return jsonify({"error": "Kein Service ausgewählt."}), 400
 
@@ -1343,7 +1410,8 @@ def add_to_queue():
 
             duration_list.append(service.duration_minutes)
 
-        duration_list.append(int(custom_duration))
+        if custom_duration:
+            duration_list.append(int(custom_duration))
 
         queues = session_db.query(QueueEntry).filter(
             QueueEntry.provider_id == current_user.id,
@@ -1924,6 +1992,11 @@ def get_provider_profile():
             provider_id=current_user.id
         ).all()
 
+        staff = session_db.query(ProviderStaff).filter(
+            ProviderStaff.provider_id == current_user.id,
+            ProviderStaff.is_owner == False,
+        ).all()
+
         settings = session_db.query(ProviderSettings).filter_by(
             provider_id=current_user.id
         ).first()
@@ -1931,9 +2004,12 @@ def get_provider_profile():
         data = {
             "business_name": provider.business_name,
             "category": provider.category,
-            "address": provider.address,
+            "street": provider.street,
+            "postal_code": provider.postal_code,
+            "city": provider.city,
             "email": credentials.email,
             "services": [serialize_service(s) for s in services],
+            "staff": [serialize_staff(s) for s in staff],
             "reminder_24h": settings.reminder_24h,
             "reminder_3h": settings.reminder_3h,
             "weekday_open": settings.weekday_open,
@@ -1963,6 +2039,12 @@ def serialize_service(s):
         "id": s.id,
         "name": s.name,
         "duration": s.duration_minutes
+    }
+
+def serialize_staff(s):
+    return {
+        "id": s.id,
+        "name": s.name,
     }
 
 
@@ -2166,11 +2248,13 @@ def change_password_verify():
 def save_business_info():
     business_name = request.form.get("business_name")
     category = request.form.get("category")
-    address = request.form.get("address")
+    street = request.form.get("street")
+    postal_code = request.form.get("postal_code")
+    city = request.form.get("city")
 
     session_db = Session()
     try:
-        if not business_name or not category or not address:
+        if not business_name or not category or not street or not postal_code or not city:
             emit_to_user("error", {
                 "error": "Bitte füllen Sie alle erforderlichen Felder aus."
             })
@@ -2180,7 +2264,7 @@ def save_business_info():
             id=current_user.id
         ).first()
 
-        if (provider.business_name, provider.category, provider.address) == (business_name, category, address):
+        if (provider.business_name, provider.category, provider.street, provider.postal_code, provider.city) == (business_name, category, street, postal_code, city):
             emit_to_user("error", {
                 "error": "Es wurden keine Änderungen vorgenommen."
             })
@@ -2191,7 +2275,9 @@ def save_business_info():
         ).update({
             Provider.business_name: business_name,
             Provider.category: category,
-            Provider.address: address
+            Provider.street: street,
+            Provider.postal_code: postal_code,
+            Provider.city: city,
         })
 
         session_db.commit()
@@ -2433,6 +2519,50 @@ def save_services():
     finally:
         session_db.close()
 
+@app.route("/dashboard/settings/staff/save", methods=["POST"])
+@login_required
+def save_staff():
+    data = request.get_json()
+    staff = data.get("staff", [])
+
+    session_db = Session()
+    try:
+        session_db.query(ProviderStaff).filter(
+            ProviderStaff.provider_id == current_user.id,
+            ProviderStaff.is_owner == False
+        ).delete()
+
+        for s in staff:
+            name = s.get("name", "").strip()
+
+            if not name:
+                continue
+
+            session_db.add(ProviderStaff(
+                provider_id=current_user.id,
+                name=name,
+                is_owner=False
+            ))
+
+        session_db.commit()
+
+        if not staff:
+            emit_to_user("message", {"message": "Personal erfolgreich gelöscht."})
+            return jsonify({"message": "Personal erfolgreich gelöscht."}), 200
+
+        emit_to_user("message", {"message": "Personal erfolgreich gespeichert."})
+        return jsonify({"message": "Personal erfolgreich gespeichert."}), 200
+
+    except Exception as e:
+        print(e)
+        emit_to_user("error", {
+            "error": "Beim Speichern deines Personals ist ein Fehler aufgetreten."
+        })
+        return jsonify({"error": str(e)}), 500
+
+    finally:
+        session_db.close()
+
 def reminder_worker():
     while True:
         session_db = Session()
@@ -2440,7 +2570,12 @@ def reminder_worker():
             now = datetime.datetime.now(datetime.timezone.utc).astimezone().replace(microsecond=0, second=0)
             in_24h = now + datetime.timedelta(hours=24)
             in_3h = now + datetime.timedelta(hours=3)
-
+            
+            now_ = time.time()
+            for data in [registration_data, password_reset_data]:
+                expired = [k for k, v in data.items() if now_ - v.get("created_at", now_) > 600]
+                for k in expired:
+                    data.pop(k, None)
 
             appointments = session_db.query(Appointment).filter(
                 Appointment.customer_email != None,
@@ -2874,10 +3009,17 @@ def customer_join_queue(token):
         customer_name = request.form.get("customer_name", "").strip()
         customer_phone = request.form.get("customer_phone", "").strip()
         services = request.form.getlist("services[]")
+        custom_duration = request.form.get("custom_duration", None)
+
         duration_list = []
 
-        if not customer_name or not services:
-            return jsonify({"error": "Bitte Name und Service angeben."}), 400
+        if custom_duration == "":
+            emit_to_user("error", {"error": "Bitte eine gültige Dauer eingeben."})
+            return jsonify({"error": "Custom-Dauer fehlt."}), 400
+
+        if not services and custom_duration is None:
+            emit_to_user("error", {"error": "Bitte mindestens einen Service auswählen."})
+            return jsonify({"error": "Kein Service ausgewählt."}), 400
 
         for s in services:
             service = session_db.query(ProviderService).filter_by(
@@ -2889,6 +3031,9 @@ def customer_join_queue(token):
                 return jsonify({"error": "Service nicht gefunden."}), 400
 
             duration_list.append(service.duration_minutes)
+
+        if custom_duration:
+            duration_list.append(int(custom_duration))
 
         active_count = session_db.query(QueueEntry).filter_by(
             provider_id=settings.provider_id
@@ -2904,6 +3049,7 @@ def customer_join_queue(token):
             customer_name=customer_name,
             customer_phone=customer_phone,
             services_json=json.dumps(services),
+            custom_duration=custom_duration if custom_duration else None,
             duration_minutes=sum(duration_list),
             position=active_count + 1,
             original_position=active_count + 1,
