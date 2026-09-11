@@ -158,17 +158,28 @@
     const rows = document.querySelectorAll(".service-row");
     const services = [];
     const errorMsg = document.getElementById("error-msg");
+    let hasError = false;
 
     rows.forEach(row => {
       const name = row.querySelector(".service-name").value.trim();
       const duration = row.querySelector(".service-duration").value;
-      if (name && duration) {
+      console.log(name, duration);
+
+      if (!name || !duration) {
+        hasError = true;
+        return;
+      } else {
         services.push({ name: name, duration: duration });
       }
     });
 
-    if (services.length === 0) {
+    if (hasError || services.length === 0) {
       errorMsg.classList.add("show");
+
+      setTimeout(() => {
+        errorMsg.classList.remove("show");
+      }, 5000);
+
       return;
     }
 

@@ -62,7 +62,7 @@ def index():
 
 @app.route("/provider-login-page", methods=["GET"])
 def provider_login_page():
-    session["room_id"] = f"login_{uuid.uuid4()}"
+    session["room_id"] = f"login_{secrets.token_urlsafe(16)}"
     return render_template("provider-login.html", room_id=session.get("room_id"))
 
 @app.route("/provider-login", methods=["POST", "GET"])
@@ -103,7 +103,7 @@ def provider_login():
 
 @app.route("/register/provider", methods=["GET"])
 def provider_register():
-    session["room_id"] = f"register_{uuid.uuid4()}"
+    session["room_id"] = f"register_{secrets.token_urlsafe(16)}"
     return render_template("provider-register.html", room_id=session.get("room_id"))
 
 @app.route("/register/provider/submit", methods=["POST", "GET"])
@@ -416,7 +416,7 @@ def onboarding_staff():
 
 @app.route("/password-reset", methods=["POST", "GET"])
 def password_reset():
-    session["room_id"] = f"reset_{uuid.uuid4()}"
+    session["room_id"] = f"reset_{secrets.token_urlsafe(16)}"
 
     return render_template("password-reset.html", room_id=session.get("room_id"))
 
@@ -564,7 +564,7 @@ def passwort_reset_check():
 
 @app.route("/password-update", methods=["POST", "GET"])
 def password_update():
-    session["room_id"] = f"pw_update_{uuid.uuid4()}"
+    session["room_id"] = f"pw_update_{secrets.token_urlsafe(16)}"
 
     return render_template("password-update.html", room_id=session.get("room_id"))
 
@@ -639,7 +639,7 @@ def dashboard():
     ).all()
 
     session_db.close()
-
+    print(session.get("room_id"), "room_id")
     return render_template("dashboard.html", room_id=session.get("room_id"), services=services)
 
 @app.route("/dashboard/appointments", methods=["POST", "GET"])
@@ -1394,6 +1394,13 @@ def add_to_queue():
             emit_to_user("error", {"error": "Bitte mindestens einen Service auswählen."})
             return jsonify({"error": "Kein Service ausgewählt."}), 400
 
+        count = session_db.query(QueueEntry).filter_by(
+            provider_id=current_user.id,
+        ).count()
+
+        if not customer_name:
+            customer_name = f"Walk-In #{count + 1}"
+
         duration_list = []
 
         for s in services:
@@ -1956,7 +1963,10 @@ def delete_account():
         session_db.query(QueueEntry).filter_by(provider_id=provider_id).delete()
         session_db.query(ProviderService).filter_by(provider_id=provider_id).delete()
         session_db.query(ProviderCredentials).filter_by(provider_id=provider_id).delete()
-        session_db.query(Provider).filter_by(id=provider_id).delete()  # ← zuletzt
+        session_db.query(ProviderStaff).filter_by(id=provider_id).delete()
+        session_db.query(ProviderSettings).filter_by(id=provider_id).delete()
+        session_db.query(ProviderSubscription).filter_by(id=provider_id).delete()
+        session_db.query(Provider).filter_by(id=provider_id).delete() # <-- zuletzt
         session_db.commit()
 
         session_db.commit()
@@ -2954,7 +2964,7 @@ def qr_image():
         return jsonify({"error": str(e)}), 500
 
 
-@app.route("/queue/<string:token>")
+@app.route("/queue/<string:token>") # Room muss anders sein! Weil sonst sieht man Errors im Dashboard
 def customer_queue(token):
 
     session_db = Session()
@@ -3020,6 +3030,13 @@ def customer_join_queue(token):
         if not services and custom_duration is None:
             emit_to_user("error", {"error": "Bitte mindestens einen Service auswählen."})
             return jsonify({"error": "Kein Service ausgewählt."}), 400
+
+        count = session_db.query(QueueEntry).filter_by(
+            provider_id=current_user.id,
+        ).count()
+
+        if not customer_name:
+            customer_name = f"Walk-In #{count + 1}"
 
         for s in services:
             service = session_db.query(ProviderService).filter_by(
