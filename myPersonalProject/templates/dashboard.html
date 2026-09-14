@@ -787,16 +787,20 @@
   const appointmentCustomCheckbox = document.getElementById("appointmentCustomServiceCheckbox");
   const appointmentCustomBox = document.getElementById("appointmentCustomDurationBox");
 
-  appointmentCustomCheckbox.addEventListener("change", () => {
-      appointmentCustomBox.style.display = appointmentCustomCheckbox.checked ? "block" : "none";
-  });
+  if (appointmentCustomCheckbox) {
+    appointmentCustomCheckbox.addEventListener("change", () => {
+        appointmentCustomBox.style.display = appointmentCustomCheckbox.checked ? "block" : "none";
+    });
+  }
 
   const queueCustomCheckbox = document.getElementById("queueCustomServiceCheckbox");
   const queueCustomBox = document.getElementById("queueCustomDurationBox");
 
-  queueCustomCheckbox.addEventListener("change", () => {
-      queueCustomBox.style.display = queueCustomCheckbox.checked ? "block" : "none";
-  });
+  if (queueCustomCheckbox) {
+    queueCustomCheckbox.addEventListener("change", () => {
+        queueCustomBox.style.display = queueCustomCheckbox.checked ? "block" : "none";
+    });
+  }
 
   // ── FullCalendar ────────────────────────────────────────────
   document.addEventListener("DOMContentLoaded", async () => {
@@ -901,9 +905,12 @@
         document.getElementById('appointment_email').value = props.email || '';
         document.getElementById('appointment_notes').value = props.notes || '';
         const checkboxes = document.querySelectorAll('#appointment-service-checkboxes input[type="checkbox"]');
-        checkboxes.forEach(cb => {
-          if (props.services_json.includes(cb.value)) cb.checked = true;
-        });
+
+        if (checkboxes) {
+          checkboxes.forEach(cb => {
+            if (props.services_json.includes(cb.value)) cb.checked = true;
+          });
+        }
 
         if (!["completed", "no_show"].includes(info.event.extendedProps.status)) {
           document.querySelectorAll('.btn-delete').forEach(btn => btn.style.display = 'block');

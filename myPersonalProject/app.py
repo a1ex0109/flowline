@@ -788,9 +788,10 @@ def edit_appointment(appointment_id):
 
         if has_conflict(provider_id, start_datetime, end_datetime, appointment_id):
             emit_to_user("error", {
-                "error": "Ein Termin darf maximal 5 Minuten über einen anderen rüberragen."
+                "error": '''Ein Termin darf maximal 5 Minuten über einen anderen rüberragen. 
+                 Diese Regel kann in den Einstellungen unter 'Terminregeln' deaktiviert werden.'''
             })
-            return jsonify({"error": "Überlappung > 5 Minuten"}),
+            return jsonify({"error": "Überlappung > 5 Minuten"}), 400
 
         appointment = session_db.query(Appointment).filter_by(
             id=appointment_id,
@@ -931,9 +932,10 @@ def move_appointment(appointment_id, type):
 
         if has_conflict(current_user.id, new_start, end, exclude_appointment_id=appointment_id):
             emit_to_user("error", {
-                "error": "Ein Termin darf maximal 5 Minuten über einen anderen rüberragen."
+                "error": '''Ein Termin darf maximal 5 Minuten über einen anderen rüberragen. 
+                             Diese Regel kann in den Einstellungen unter 'Terminregeln' deaktiviert werden.'''
             })
-            return jsonify({"error": "Überlappung > 5 Minuten"}),
+            return jsonify({"error": "Überlappung > 5 Minuten"}), 400
 
         appointment.start = new_start
         appointment.end = end
@@ -977,9 +979,10 @@ def resize_appointment(appointment_id, type):
 
             if has_conflict(current_user.id, start, end, exclude_appointment_id=appointment_id):
                 emit_to_user("error", {
-                    "error": "Ein Termin darf maximal 5 Minuten über einen anderen rüberragen."
+                    "error": '''Ein Termin darf maximal 5 Minuten über einen anderen rüberragen. 
+                                 Diese Regel kann in den Einstellungen unter 'Terminregeln' deaktiviert werden.'''
                 })
-                return jsonify({"error": "Überlappung > 5 Minuten"}),
+                return jsonify({"error": "Überlappung > 5 Minuten"}), 400
 
             appointment.start = start
             appointment.end = end
