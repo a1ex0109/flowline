@@ -131,6 +131,9 @@ class ProviderSettings(Base):
     sms_credits_used = Column(Integer, default=0)
     sms_credits_reset = Column(DateTime, default=datetime.utcnow)
 
+    tolerance_enabled = Column(Boolean, default=True)
+    tolerance_minutes = Column(Integer, default=5)
+
     queue_token = Column(String(64), unique=True, nullable=True)
 
     provider = relationship("Provider", back_populates="settings")

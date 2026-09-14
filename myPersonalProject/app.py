@@ -862,7 +862,7 @@ def has_conflict(provider_id, start, end, exclude_appointment_id=None):
         if start < a_end and end > a_start:
             overlap = min(end, a_end) - max(start, a_start)
 
-            # > 5 Minuten → Konflikt
+            # > 5 Minuten → echter Termin-Konflikt
             if overlap > MAX_OVERLAP:
                 session_db.close()
                 return True
@@ -873,8 +873,6 @@ def has_conflict(provider_id, start, end, exclude_appointment_id=None):
         QueueEntry.status.not_in(["completed", "no_show"])
     ).all()
 
-    session_db.close()
-
     for q in queues:
         if not q.start:
             continue
@@ -882,13 +880,21 @@ def has_conflict(provider_id, start, end, exclude_appointment_id=None):
         q_start = q.start.astimezone()
         q_end = q.end.astimezone()
 
+        # Walk-in überlappt mit Termin?
         if start < q_end and end > q_start:
             overlap = min(end, q_end) - max(start, q_start)
 
+            # Walk-ins werden IMMER verschoben → Termine haben Priorität
             if overlap > MAX_OVERLAP:
-                return True
+                # Walk-in automatisch verschieben
+                duration = q_end - q_start
+                q.start = end
+                q.end = end + duration
+                session_db.commit()
 
+    session_db.close()
     return False
+
 
 
 @app.route("/dashboard/appointments/<int:appointment_id>/<string:type>/move", methods=["PATCH"])
