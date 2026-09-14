@@ -860,7 +860,7 @@
           'no_show': 'Nicht erschienen',
           'completed': 'Erledigt',
           'confirmed': 'Bestätigt',
-          'assigned': 'Zugewiesen',
+          'assigned': 'Wartet',
           'in_progress': 'Dran'
         };
         const status = statusMap[info.event.extendedProps.status] || 'Unbekannt';
@@ -947,9 +947,9 @@
         });
 
         if (!res.ok) {
-
           const data = await res.json().catch(() => null);
           console.log(data?.error);
+          info.revert();
           return;
         }
 
@@ -977,20 +977,6 @@
      socket.emit("join_room", { room: "{{ room_id }}" });
   });
 
-  socket.on("queue_updated", (data) => {
-    document.getElementById("message").textContent = data.message;
-    const popup = document.getElementById("message-popup");
-    if (popup && popupTimeout == null) {
-      popup.classList.add("show");
-      popupTimeout = setTimeout(() => {
-        popupTimeout = null;
-        popup.classList.remove("show")
-        }, 5000
-      );
-    }
-    state.calendar.refetchEvents();
-  });
-
   socket.on("message", (data) => {
     document.getElementById("message").textContent = data.message;
     const popup = document.getElementById("message-popup");
@@ -1002,6 +988,7 @@
         }, 5000
       );
     }
+    state.calendar.refetchEvents();
   });
 
   socket.on("error", (data) => {
@@ -1149,7 +1136,7 @@
   }
 
   function renderQueue(queue) {
-    const statusMap = {'assigned': 'Wartet', in_progress: 'Dran', completed: 'Fertig', no_show: 'Nicht gekommen' };
+    const statusMap = {'assigned': 'Wartet',  'in_progress': 'Dran', 'completed': 'Fertig', 'no_show': 'Nicht gekommen' };
     const list = document.getElementById("queue-list");
     list.innerHTML = "";
 

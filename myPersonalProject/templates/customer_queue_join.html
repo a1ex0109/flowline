@@ -223,16 +223,6 @@
                         {{ s.name }} ({{ s.duration_minutes }} Min)
                     </label>
                 {% endfor %}
-
-                <label class="checkbox-item">
-                    <input type="checkbox" value="custom" id="queueCustomServiceCheckbox">
-                    Sonstiges (benutzerdefinierte Dauer)
-                </label>
-
-                <div id="queueCustomDurationBox" style="display:none;margin-top:8px;">
-                    <label>Dauer (Minuten):</label>
-                    <input class="no-form-style" type="number" id="queueCustomDurationInput" min="1" max="300" placeholder="z.B. 12">
-                </div>
             </div>
             <button class="btn-primary" id="submit-btn" onclick="joinQueue()">
                 Jetzt eintragen →
@@ -254,32 +244,19 @@
 </div>
 
 <script>
-    const queueCustomCheckbox = document.getElementById("queueCustomServiceCheckbox");
-    const queueCustomBox = document.getElementById("queueCustomDurationBox");
-
-    queueCustomCheckbox.addEventListener("change", () => {
-        queueCustomBox.style.display = queueCustomCheckbox.checked ? "block" : "none";
-    });
-
     async function joinQueue() {
         const selectedServices = [];
         const name = document.getElementById("customer_name").value.trim();
         const phone = document.getElementById("customer_phone").value.trim();
         const errorMsg = document.getElementById("error-msg");
 
-        let customDuration = null;
         let hasServiceInSystem = false;
 
         const checkboxes = document.querySelectorAll("#queue-service-checkboxes input[type='checkbox']:checked")
 
         checkboxes.forEach(cb => {
             if (!cb.checked) return;
-
-            if (cb.value === "custom") {
-              customDuration = document.getElementById("queueCustomDurationInput").value;
-            } else {
-                selectedServices.push(cb.value);
-            }
+            selectedServices.push(cb.value);
         });
 
         hasServicesInSystem =
@@ -309,7 +286,7 @@
         }
 
 
-        if (selectedServices.length === 0 && !customDuration) {
+        if (selectedServices.length === 0) {
           errorMsg.textContent = "Bitte Services vollständig ausfüllen, bevor du fortfährst.";
           errorMsg.classList.add("show");
 
@@ -330,10 +307,6 @@
         formData.append("customer_name", name);
         formData.append("customer_phone", phone);
         selectedServices.forEach(s => formData.append("services[]", s));
-
-        if (customDuration !== null) {
-            formData.append("custom_duration", customDuration);
-        }
 
         try {
           const res = await fetch("/queue/{{ token }}/join", {

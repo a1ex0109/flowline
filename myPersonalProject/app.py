@@ -1,4 +1,5 @@
 import smtplib
+from datetime import timedelta
 from email.message import EmailMessage
 from flask import Flask, render_template, redirect, url_for, request, session, send_file, jsonify
 from flask_bcrypt import Bcrypt
@@ -32,7 +33,7 @@ login_manager = LoginManager(app)
 login_manager.login_view = "provider_login_page"
 TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID")
 TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN")
-TWILIO_PHONE_NUMBER = os.getenv("TWILIO_PHONE_NUMBER")
+TWILIO_WHATSAPP_NUMBER = os.getenv("TWILIO_WHATSAPP_NUMBER")
 registration_data = {}
 password_reset_data = {}
 
@@ -757,7 +758,11 @@ def edit_appointment(appointment_id):
 
     session_db = Session()
     try:
-        if not services or not custom_duration:
+        if custom_duration == "":
+            emit_to_user("error", {"error": "Bitte eine gültige Dauer eingeben."})
+            return jsonify({"error": "Custom-Dauer fehlt."}), 400
+
+        if not services and custom_duration is None:
             emit_to_user("error", {"error": "Bitte mindestens einen Service auswählen."})
             return jsonify({"error": "Kein Service ausgewählt."}), 400
 
@@ -775,14 +780,17 @@ def edit_appointment(appointment_id):
 
             duration_list.append(service.duration_minutes)
 
-        duration_list.append(int(custom_duration))
+        if custom_duration:
+            duration_list.append(int(custom_duration))
 
         total_duration = sum(duration_list)
         end_datetime = (start_datetime + datetime.timedelta(minutes=total_duration)).astimezone()
 
         if has_conflict(provider_id, start_datetime, end_datetime, appointment_id):
-            emit_to_user("error", {"error": "Dieser Zeitraum ist bereits vergeben."})
-            return jsonify({"error": "Zeit bereits belegt."}), 400
+            emit_to_user("error", {
+                "error": "Ein Termin darf maximal 5 Minuten über einen anderen rüberragen."
+            })
+            return jsonify({"error": "Überlappung > 5 Minuten"}),
 
         appointment = session_db.query(Appointment).filter_by(
             id=appointment_id,
@@ -833,34 +841,35 @@ def edit_appointment(appointment_id):
 
 def has_conflict(provider_id, start, end, exclude_appointment_id=None):
     session_db = Session()
+    MAX_OVERLAP = datetime.timedelta(minutes=5)
 
-    #rows = cursor.execute("""
-        #SELECT appointment_id, start, end
-        #FROM appointments_table
-        #WHERE provider_id = ?
-          #AND status NOT IN ('no_show', 'completed')
-    #""", (provider_id,)).fetchall()
-
+    # Termine laden
     appointments = session_db.query(Appointment).filter(
         Appointment.provider_id == provider_id,
         Appointment.status.not_in(["no_show", "completed"])
     ).all()
 
-    if not appointments:
-        return False
-
+    # Termine prüfen
     for a in appointments:
         if exclude_appointment_id and a.id == exclude_appointment_id:
             continue
 
-        if start < a.end.astimezone() and end > a.start.astimezone():
-            return True
+        a_start = a.start.astimezone()
+        a_end = a.end.astimezone()
 
-    # 2. Walk‑ins prüfen (nur assigned)
+        # echte Überschneidung?
+        if start < a_end and end > a_start:
+            overlap = min(end, a_end) - max(start, a_start)
 
+            # > 5 Minuten → Konflikt
+            if overlap > MAX_OVERLAP:
+                session_db.close()
+                return True
+
+    # Walk-ins prüfen (ALLE außer completed/no_show)
     queues = session_db.query(QueueEntry).filter(
         QueueEntry.provider_id == provider_id,
-        QueueEntry.status.in_(["assigned", "in_progress"])
+        QueueEntry.status.not_in(["completed", "no_show"])
     ).all()
 
     session_db.close()
@@ -869,8 +878,14 @@ def has_conflict(provider_id, start, end, exclude_appointment_id=None):
         if not q.start:
             continue
 
-        if start < q.end.astimezone() and end > q.start.astimezone():
-            return True
+        q_start = q.start.astimezone()
+        q_end = q.end.astimezone()
+
+        if start < q_end and end > q_start:
+            overlap = min(end, q_end) - max(start, q_start)
+
+            if overlap > MAX_OVERLAP:
+                return True
 
     return False
 
@@ -914,6 +929,11 @@ def move_appointment(appointment_id, type):
         duration_delta = datetime.timedelta(minutes=appointment.duration_minutes)
         end = new_start + duration_delta
 
+        if has_conflict(current_user.id, new_start, end, exclude_appointment_id=appointment_id):
+            emit_to_user("error", {
+                "error": "Ein Termin darf maximal 5 Minuten über einen anderen rüberragen."
+            })
+            return jsonify({"error": "Überlappung > 5 Minuten"}),
 
         appointment.start = new_start
         appointment.end = end
@@ -954,6 +974,12 @@ def resize_appointment(appointment_id, type):
             if not appointment:
                 emit_to_user("error", {"error": "Der Termin wurde nicht gefunden."})
                 return jsonify({"error": "Termin nicht gefunden."}), 404
+
+            if has_conflict(current_user.id, start, end, exclude_appointment_id=appointment_id):
+                emit_to_user("error", {
+                    "error": "Ein Termin darf maximal 5 Minuten über einen anderen rüberragen."
+                })
+                return jsonify({"error": "Überlappung > 5 Minuten"}),
 
             appointment.start = start
             appointment.end = end
@@ -1703,14 +1729,17 @@ def build_timeline(appointments, queue):
     # 3. Walk‑ins automatisch einplanen
     for q in queues:
         duration = datetime.timedelta(minutes=q["duration"])
-
-        if  q["status"] not in ("completed", "no_show", "in_progress"):
+        status = q["status"]
+        if status not in ("completed", "no_show", "in_progress"):
             slot_start = find_free_slot(now, duration, appointments, timeline)
             slot_end = slot_start + duration
 
             session_db.query(QueueEntry).filter_by(
                 id=q["id"]
-            ).update({QueueEntry.start: slot_start, QueueEntry.end: slot_end})
+            ).update({
+                QueueEntry.start: slot_start,
+                QueueEntry.end: slot_end
+            })
 
             session_db.commit()
 
@@ -1740,6 +1769,7 @@ def build_timeline(appointments, queue):
 
 def find_free_slot(start_time, duration, appointments, timeline):
     candidate = start_time
+    MAX_OVERLAP = datetime.timedelta(minutes=5)
 
     while True:
         candidate_end = candidate + duration
@@ -1748,6 +1778,11 @@ def find_free_slot(start_time, duration, appointments, timeline):
         # Termine prüfen
         for a in appointments:
             if not (candidate_end <= a["start"] or a["end"] <= candidate):
+                overlap = candidate_end - a["start"]
+
+                if overlap <= MAX_OVERLAP:
+                    continue
+
                 conflict = True
                 candidate = a["end"]
                 break
@@ -1810,7 +1845,6 @@ def get_timeline():
 
 
             elif item["type"] == "Walk-in" and item["status"] in ("assigned", "in_progress"):
-                print(item["end"], now, item["end"] < now)
                 if item["end"] <= now:
                     session_db.query(QueueEntry).filter(
                         QueueEntry.provider_id == provider_id,
@@ -1831,7 +1865,7 @@ def get_timeline():
 
 
             if item["type"] == "Walk-in":
-                if item["status"] not in ("completed", "no_show", "in_progress"):
+                if item["status"] not in ("completed", "no_show", "in_progress", "manual"):
                     session_db.query(QueueEntry).filter_by(
                         id=item["id"]
                     ).update({
@@ -1941,7 +1975,7 @@ def settings():
 
     plan = subscription.plan
 
-    SMS_LIMITS = {"pro": 80, "premium": 200}
+    SMS_LIMITS = {"pro": 60, "premium": 140}
     limit = SMS_LIMITS.get(plan, 0)
 
     return render_template("settings.html",
@@ -2895,7 +2929,7 @@ def send_sms(provider_id, phone, message):
         if plan in ("free", "basic"):
             return {"success": False, "reason": "plan"}
 
-        SMS_LIMITS = {"pro": 80, "premium": 200}
+        SMS_LIMITS = {"pro": 60, "premium": 140}
         limit = SMS_LIMITS.get(plan, 0)
 
         now = datetime.datetime.utcnow()
@@ -2912,8 +2946,8 @@ def send_sms(provider_id, phone, message):
         client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
         client.messages.create(
             body=message,
-            from_=TWILIO_PHONE_NUMBER,
-            to=phone
+            from_="whatsapp:" + TWILIO_WHATSAPP_NUMBER,
+            to="whatsapp:" + phone
         )
 
         settings.sms_credits_used += 1
@@ -3019,15 +3053,10 @@ def customer_join_queue(token):
         customer_name = request.form.get("customer_name", "").strip()
         customer_phone = request.form.get("customer_phone", "").strip()
         services = request.form.getlist("services[]")
-        custom_duration = request.form.get("custom_duration", None)
 
         duration_list = []
 
-        if custom_duration == "":
-            emit_to_user("error", {"error": "Bitte eine gültige Dauer eingeben."})
-            return jsonify({"error": "Custom-Dauer fehlt."}), 400
-
-        if not services and custom_duration is None:
+        if not services:
             emit_to_user("error", {"error": "Bitte mindestens einen Service auswählen."})
             return jsonify({"error": "Kein Service ausgewählt."}), 400
 
@@ -3049,9 +3078,6 @@ def customer_join_queue(token):
 
             duration_list.append(service.duration_minutes)
 
-        if custom_duration:
-            duration_list.append(int(custom_duration))
-
         active_count = session_db.query(QueueEntry).filter_by(
             provider_id=settings.provider_id
         ).filter(
@@ -3066,7 +3092,6 @@ def customer_join_queue(token):
             customer_name=customer_name,
             customer_phone=customer_phone,
             services_json=json.dumps(services),
-            custom_duration=custom_duration if custom_duration else None,
             duration_minutes=sum(duration_list),
             position=active_count + 1,
             original_position=active_count + 1,
@@ -3098,8 +3123,7 @@ def customer_join_queue(token):
 
         session_db.commit()
 
-        socketio.emit("queue_updated", {"message": f"{customer_name} hat sich über QR-Code in die Warteschlange eingetragen."}, room=f"provider_{settings.provider_id}")
-
+        socketio.emit("message", {"message": f"{customer_name} hat sich über QR-Code in die Warteschlange eingetragen."}, room=f"provider_{settings.provider_id}")
         return jsonify({"queue_id": queue_id}), 200
 
     except Exception as e:
