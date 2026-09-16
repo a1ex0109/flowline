@@ -788,10 +788,9 @@ def edit_appointment(appointment_id):
 
         if has_conflict(provider_id, start_datetime, end_datetime, appointment_id):
             emit_to_user("error", {
-                "error": '''Ein Termin darf maximal 5 Minuten über einen anderen rüberragen. 
-                 Diese Regel kann in den Einstellungen unter 'Terminregeln' deaktiviert werden.'''
+                "error": "Dieser Zeitraum ist bereits vergeben."
             })
-            return jsonify({"error": "Überlappung > 5 Minuten"}), 400
+            return jsonify({"error": "Zeit bereits belegt."}), 400
 
         appointment = session_db.query(Appointment).filter_by(
             id=appointment_id,
@@ -842,7 +841,6 @@ def edit_appointment(appointment_id):
 
 def has_conflict(provider_id, start, end, exclude_appointment_id=None):
     session_db = Session()
-    MAX_OVERLAP = datetime.timedelta(minutes=5)
 
     # Termine laden
     appointments = session_db.query(Appointment).filter(
@@ -860,12 +858,8 @@ def has_conflict(provider_id, start, end, exclude_appointment_id=None):
 
         # echte Überschneidung?
         if start < a_end and end > a_start:
-            overlap = min(end, a_end) - max(start, a_start)
-
-            # > 5 Minuten → echter Termin-Konflikt
-            if overlap > MAX_OVERLAP:
-                session_db.close()
-                return True
+            session_db.close()
+            return True
 
     # Walk-ins prüfen (ALLE außer completed/no_show)
     queues = session_db.query(QueueEntry).filter(
@@ -880,17 +874,9 @@ def has_conflict(provider_id, start, end, exclude_appointment_id=None):
         q_start = q.start.astimezone()
         q_end = q.end.astimezone()
 
-        # Walk-in überlappt mit Termin?
         if start < q_end and end > q_start:
-            overlap = min(end, q_end) - max(start, q_start)
-
-            # Walk-ins werden IMMER verschoben → Termine haben Priorität
-            if overlap > MAX_OVERLAP:
-                # Walk-in automatisch verschieben
-                duration = q_end - q_start
-                q.start = end
-                q.end = end + duration
-                session_db.commit()
+            session_db.close()
+            return True
 
     session_db.close()
     return False
@@ -938,10 +924,9 @@ def move_appointment(appointment_id, type):
 
         if has_conflict(current_user.id, new_start, end, exclude_appointment_id=appointment_id):
             emit_to_user("error", {
-                "error": '''Ein Termin darf maximal 5 Minuten über einen anderen rüberragen. 
-                             Diese Regel kann in den Einstellungen unter 'Terminregeln' deaktiviert werden.'''
+                "error": "Dieser Zeitraum ist bereits vergeben."
             })
-            return jsonify({"error": "Überlappung > 5 Minuten"}), 400
+            return jsonify({"error": "Zeit bereits belegt."}), 400
 
         appointment.start = new_start
         appointment.end = end
@@ -985,10 +970,9 @@ def resize_appointment(appointment_id, type):
 
             if has_conflict(current_user.id, start, end, exclude_appointment_id=appointment_id):
                 emit_to_user("error", {
-                    "error": '''Ein Termin darf maximal 5 Minuten über einen anderen rüberragen. 
-                                 Diese Regel kann in den Einstellungen unter 'Terminregeln' deaktiviert werden.'''
+                    "error": "Dieser Zeitraum ist bereits vergeben."
                 })
-                return jsonify({"error": "Überlappung > 5 Minuten"}), 400
+                return jsonify({"error": "Zeit bereits belegt."}), 400
 
             appointment.start = start
             appointment.end = end
@@ -1778,7 +1762,6 @@ def build_timeline(appointments, queue):
 
 def find_free_slot(start_time, duration, appointments, timeline):
     candidate = start_time
-    MAX_OVERLAP = datetime.timedelta(minutes=5)
 
     while True:
         candidate_end = candidate + duration
@@ -1787,11 +1770,6 @@ def find_free_slot(start_time, duration, appointments, timeline):
         # Termine prüfen
         for a in appointments:
             if not (candidate_end <= a["start"] or a["end"] <= candidate):
-                overlap = candidate_end - a["start"]
-
-                if overlap <= MAX_OVERLAP:
-                    continue
-
                 conflict = True
                 candidate = a["end"]
                 break
