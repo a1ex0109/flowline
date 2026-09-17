@@ -79,6 +79,7 @@ class Appointment(Base):
     status = Column(String(50), default="pending")
     reminded_24h = Column(Boolean, default=False)
     reminded_3h = Column(Boolean, default=False)
+    appointment_token = Column(String, unique=True, nullable=False)
 
     provider = relationship("Provider", back_populates="appointments")
     staff_member = relationship("ProviderStaff", back_populates="appointments")

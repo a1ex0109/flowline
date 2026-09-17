@@ -91,31 +91,6 @@
             text-align: center;
         }
 
-        /* ── Position hero number ── */
-        .position-hero {
-            margin-bottom: 4px;
-        }
-        .position-number {
-            font-size: 72px;
-            font-weight: 800;
-            color: #111827;
-            line-height: 1;
-            letter-spacing: -2px;
-        }
-        .position-suffix {
-            font-size: 17px;
-            font-weight: 600;
-            color: #6b7280;
-            margin-top: 6px;
-        }
-
-        /* ── Divider ── */
-        .divider {
-            height: 1px;
-            background: #f3f4f6;
-            margin: 28px 0;
-        }
-
         /* ── Info rows ── */
         .info-grid {
             display: flex;
@@ -220,8 +195,8 @@
     <div class="logo-row">
         <div class="logo">Flowline</div>
     </div>
-    <div class="provider-name">{{ provider.business_name }}</div>
-    <div class="provider-address">{{ provider.street }}, {{ provider.postal_code }} {{ provider.city }}</div>
+    <div class="provider-name">{{ appointment.provider.business_name }}</div>
+    <div class="provider-address">{{ appointment.provider.street }}, {{ appointment.provider.postal_code }} {{ appointment.provider.city }}</div>
 
     <div class="card">
         <div class="live-header" id="live-header">
@@ -252,15 +227,23 @@
 
     async function updateStatus() {
         try {
-            const res = await fetch("/queue/{{ token }}/status/{{ appointment_id }}/data");
+            const res = await fetch("/appointment/{{ token }}/status/data");
 
             if (!res.ok) {
                 hideLiveHeader();
+
+                // Unterscheidung: 404 (nicht gefunden/gelöscht) vs. andere Fehler
+                const titleText = res.status === 404 ? "Termin nicht gefunden" : "Fehler beim Laden";
+                const messageText = res.status === 404
+                    ? "Dein Termin existiert nicht mehr oder wurde gelöscht. Bitte wende dich an das Personal."
+                    : "Bitte lade die Seite neu oder wende dich an das Personal.";
+
                 document.getElementById("status-container").innerHTML = `
                     <div class="state-icon">⚠️</div>
-                    <div class="state-title state-error-title" style="color:#dc2626;">Fehler beim Laden</div>
-                    <div class="state-text">Bitte lade die Seite neu oder wende dich an das Personal.</div>
+                    <div class="state-title" style="color:#dc2626;">${titleText}</div>
+                    <div class="state-text">${messageText}</div>
                 `;
+
                 clearInterval(pollInterval);
                 return;
             }
@@ -290,7 +273,6 @@
                 return;
             }
 
-            // Fertig / abgeschlossen
             if (data.status === "completed" || data.status === "Erledigt") {
                 hideLiveHeader();
                 document.getElementById("status-container").innerHTML = `
@@ -307,16 +289,7 @@
                 ? `~${data.estimated_wait_minutes} Min`
                 : "–";
 
-            const positionLabel = data.position === 2 ? "Du bist als Nächstes dran" : "Personen vor dir";
-            const positionNumber = data.position === 2 ? "" : data.position - 1;
-
             document.getElementById("status-container").innerHTML = `
-                <div class="position-hero">
-                    <div class="position-number">${positionNumber}</div>
-                    <div class="position-suffix">${positionLabel}</div>
-                </div>
-
-                <div class="divider"></div>
 
                 <div class="info-grid">
                     <div class="info-box">

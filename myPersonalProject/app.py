@@ -710,7 +710,8 @@ def appointments():
                 notes=notes,
                 services_json=json.dumps(services),
                 custom_duration=custom_duration if custom_duration else None,
-                status="pending"
+                status="pending",
+                appointment_token=secrets.token_urlsafe(16)
             )
 
             session_db.add(new_appointment)
@@ -2636,7 +2637,11 @@ def reminder_worker():
                 if settings.reminder_3h:
                     diff_3 = abs((start - in_3h).total_seconds())
                     if diff_3 < 60 and not a.reminded_3h:
+                        a.reminded_3h = True
+                        session_db.commit()
+
                         send_reminder_email(a, "3h")
+
                         if settings.sms_enabled and a.customer_phone:
                             message = f"Dein Termin bei {a.provider.business_name} ist in 3 Stunden ({start.strftime('%H:%M')} Uhr). Bis gleich!"
                             result = send_sms(
@@ -2649,8 +2654,7 @@ def reminder_worker():
                                 settings.sms_credits_used += 1
                                 session_db.commit()
 
-                        a.reminded_3h = True
-                        session_db.commit()
+
 
         except Exception as e:
             print("REMINDER ERROR:", e)
@@ -2665,15 +2669,47 @@ def send_reminder_email(appointment, timing):
     YOUR_APP_PASSWORD = os.getenv("SMTP_PASSWORD")
 
     if timing == "24h":
-        subject = "Erinnerung: Dein Termin morgen – Flowline"
+        subject = f"Erinnerung: Dein Termin morgen bei {appointment.provider.business_name}"
         zeit_text = "morgen"
     else:
-        subject = "Erinnerung: Dein Termin in 3 Stunden – Flowline"
+        subject = f"Erinnerung: Dein Termin in 3 Stunden bei {appointment.provider.business_name}"
         zeit_text = "in 3 Stunden"
 
     start_local = appointment.start.astimezone()
     uhrzeit = start_local.strftime("%H:%M")
     datum = start_local.strftime("%d.%m.%Y")
+
+    tracking_link = f"http://127.0.0.1:6060/appointment/{appointment.appointment_token}/status"
+
+    session_db = Session()
+
+    try:
+        service_ids = json.loads(appointment.services_json)
+    except:
+        service_ids = []
+
+    services = session_db.query(ProviderService).filter(
+        ProviderService.id.in_(service_ids)
+    ).all()
+
+    service_names = " + ".join([s.name for s in services]) if services else None
+    duration = sum([s.duration_minutes for s in services])
+
+    if appointment.custom_duration:
+        if service_names:
+            service_names += f" + {appointment.custom_duration} Min. Verlängerung"
+        else:
+            service_names = f"Individuell ({appointment.custom_duration} Min.)"
+
+    button_html = ""
+    if timing == "3h":
+        button_html = f'''
+            <div style="text-align: center; margin: 24px 0;">
+              <a href="{tracking_link}" style="background: #2d6a4f; color: white; padding: 12px 24px; border-radius: 10px; text-decoration: none; font-weight: 600; font-size: 14px;">
+                Live-Wartezeit ansehen →
+              </a>
+            </div>
+            '''
 
     text_fallback = (f'''
 Hallo {appointment.customer_name},
@@ -2682,7 +2718,8 @@ dein Termin ist {zeit_text}.
 
 Datum: {datum}
 Uhrzeit: {uhrzeit} Uhr
-Service: {appointment.service.name if appointment.service else "–"}
+Service: {service_names if service_names else "–"}
+Dauer: {duration} Min
 
 Falls du nicht kommen kannst, melde dich bitte rechtzeitig.
 
@@ -2700,12 +2737,14 @@ Flowline – {YOUR_EMAIL}
     <tr><td style="padding:40px;">
       <p style="font-size:14px;color:#6b7280;margin:0 0 24px;">Hallo {appointment.customer_name},</p>
       <h1 style="font-size:22px;font-weight:700;color:#111827;margin:0 0 12px;">Dein Termin ist {zeit_text}</h1>
-      <p style="font-size:14px;color:#6b7280;line-height:1.6;margin:0 0 32px;">Wir erinnern dich an deinen bevorstehenden Termin.</p>
+      <p style="font-size:14px;color:#6b7280;line-height:1.6;margin:0 0 32px;">Wir erinnern dich an deinen bevorstehenden Termin bei bei {appointment.provider.business_name}.</p>
       <div style="background:#f0f2ee;border-radius:12px;padding:24px;margin:0 0 32px;">
         <p style="font-size:14px;color:#374151;margin:0 0 8px;"><strong>📅 Datum:</strong> {datum}</p>
         <p style="font-size:14px;color:#374151;margin:0 0 8px;"><strong>🕐 Uhrzeit:</strong> {uhrzeit} Uhr</p>
-        <p style="font-size:14px;color:#374151;margin:0;"><strong>✂️ Service:</strong> {appointment.service.name if appointment.service else "–"}</p>
+        <p style="font-size:14px;color:#374151;margin:0 0 8px;"><strong>✂️ Service:</strong> {service_names if service_names else "–"}</p>
+        <p style="font-size:14px;color:#374151;margin:0;"><strong>⏱️ Dauer:</strong> {duration} Min</p>
       </div>
+      {button_html}
       <p style="font-size:12px;color:#9ca3af;line-height:1.6;margin:0;">Falls du den Termin nicht wahrnehmen kannst, melde dich bitte rechtzeitig.<br>Bei Fragen erreichst du uns unter <a href="mailto:{YOUR_EMAIL}" style="color:#2d6a4f;">{YOUR_EMAIL}</a>.</p>
     </td></tr>
     <tr><td style="background:#f9fafb;padding:20px 40px;border-top:1px solid #f3f4f6;">
@@ -2728,7 +2767,6 @@ Flowline – {YOUR_EMAIL}
         server.starttls()
         server.login(YOUR_EMAIL, YOUR_APP_PASSWORD)
         server.send_message(msg)
-
 
 @app.route("/dashboard/settings/email_reminder_settings/save", methods=["POST"])
 @login_required
@@ -3241,6 +3279,96 @@ def customer_queue_status_data(token, queue_id):
                 "name": entry.customer_name,
                 "status": statusMap[f"{entry.status}"],
                 "position": entry.position_with_appointments,
+                "estimated_wait_minutes": estimated_minutes
+            }), 200
+
+    finally:
+        session_db.close()
+
+@app.route("/appointment/<string:token>/status")
+def customer_appointment_status(token):
+
+    session_db = Session()
+    try:
+        appointment = session_db.query(Appointment).filter_by(
+            appointment_token=token
+        ).first()
+
+        if not appointment:
+            return render_template("appointment_invalid.html"), 404
+
+        return render_template("customer_appointment_status.html",
+           token=token,
+           appointment_id=appointment.id
+       )
+
+    finally:
+        session_db.close()
+
+@app.route("/appointment/<string:token>/status/<int:queue_id>/data")
+def customer_appointment_status_data(token, appointment_id):
+    statusMap = {
+        "pending": "Ausstehend",
+        "no_show": "Nicht erschienen",
+        "completed": "Erledigt",
+        "assigned": "Wartend",
+        "in_progress": "Dran"
+    }
+
+    session_db = Session()
+    try:
+        appointment = session_db.query(Appointment).filter_by(
+            appointment_token=token
+        ).first()
+
+        if not appointment:
+            return jsonify({"error": "Termin nicht gefunden"}), 404
+
+        if appointment.status == "completed":
+            return jsonify({"status": statusMap["completed"]}), 200
+
+        if appointment.status == "no_show":
+            return jsonify({"status": statusMap["no_show"]}), 200
+
+        estimated_minutes = None
+        if appointment.start:
+            start_aware = appointment.start.astimezone()
+            end_aware = appointment.end.astimezone()
+            now = datetime.datetime.now(datetime.timezone.utc).astimezone().replace(second=0, microsecond=0)
+            diff_seconds = (start_aware - now).total_seconds()
+            estimated_minutes = max(round(int(diff_seconds) / 60), 0)
+
+            if end_aware < now:
+                session_db.query(Appointment).filter_by(
+                    id=appointment_id,
+                    provider_id=appointment.provider_id
+                ).update({Appointment.status: "completed"})
+
+                session_db.commit()
+
+                appointment.status = "completed"
+
+            if start_aware <= now <= end_aware:
+                session_db.query(Appointment).filter_by(
+                    id=appointment_id,
+                    provider_id=appointment.provider_id
+                ).update({Appointment.status: "in_progress"})
+
+                session_db.commit()
+
+                appointment.status = "in_progress"
+
+        if not appointments:
+            return jsonify({
+                "name": appointment.customer_name,
+                "status": statusMap[f"{appointment.status}"],
+                "estimated_wait_minutes": estimated_minutes
+            }), 200
+
+        else:
+            return jsonify({
+                "name": appointment.customer_name,
+                "status": statusMap[f"{appointment.status}"],
                 "estimated_wait_minutes": estimated_minutes
             }), 200
 
