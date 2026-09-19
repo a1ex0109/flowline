@@ -485,6 +485,9 @@
     <a class="nav-item" onclick="showPane('qr')" href="#">
       <i class="fa-solid fa-qrcode"></i> Queue QR-Code
     </a>
+    <a class="nav-item" onclick="showPane('terminregeln')" href="#">
+      <i class="fa-solid fa-clock-rotate-left"></i> Terminregeln
+    </a>
     <a class="nav-item" onclick="showPane('benachrichtigungen')" href="#">
       <i class="fa-regular fa-bell"></i> Benachrichtigungen
     </a>
@@ -800,6 +803,34 @@
       </form>
     </div>
 
+    <!-- Terminregeln -->
+    <div class="pane" id="pane-terminregeln">
+      <div class="page-title">Terminregeln</div>
+      <div class="page-subtitle">Wie Flowline mit überzogenen Terminen umgeht.</div>
+
+      <form class="section-card" onsubmit="saveAutoCompleteSettings(); return false;">
+        <div class="section-header">
+          <div class="section-header-icon"><i class="fa-solid fa-clock-rotate-left"></i></div>
+          <div>
+            <div class="section-title">Automatischer Abschluss</div>
+            <div class="section-desc">Falls du "Nächster Kunde" vergisst zu klicken</div>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-row-label">Nach Überziehung</div>
+          <div class="form-row-value">
+            <input id="auto_complete_minutes" type="number" value="20" min="5" max="60" style="width:100px;">
+            <div class="hint">
+              Läuft ein Termin länger als geplant und du klickst nicht auf "Nächster Kunde", schließt Flowline ihn automatisch nach dieser Anzahl Minuten – damit sich nachfolgende Termine korrekt anpassen können.
+            </div>
+          </div>
+        </div>
+        <div class="section-footer">
+          <button class="btn-save">Speichern</button>
+        </div>
+      </form>
+    </div>
+
     <!-- Benachrichtigungen -->
     <div class="pane" id="pane-benachrichtigungen">
       <div class="page-title">Benachrichtigungen</div>
@@ -915,6 +946,7 @@
     document.getElementById("sunday_closed").checked = data?.sunday_closed;
     document.getElementById("queue_enabled").checked = data?.queue_enabled;
     document.getElementById("queue_max_length").value = data?.queue_max_length;
+    document.getElementById("auto_complete_minutes").value = data?.auto_complete_after_minutes;
 
     data.services.forEach(service => {
       document.getElementById("services-list").innerHTML += `
@@ -1292,6 +1324,24 @@
     if (!res.ok) {
         const data = await res.json().catch(() => null);
         console.log(data?.error);
+    }
+  }
+
+  async function saveAutoCompleteSettings() {
+    const minutes = document.getElementById("auto_complete_minutes").value;
+
+    const res = await fetch('/dashboard/settings/auto_complete/save', {
+      method: 'POST',
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        "auto_complete_after_minutes": parseInt(minutes)
+      })
+    });
+
+    if (!res.ok) {
+      const data = await res.json().catch(() => null);
+      console.log(data?.error);
+      return;
     }
   }
 </script>

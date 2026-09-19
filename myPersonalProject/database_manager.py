@@ -74,6 +74,8 @@ class Appointment(Base):
     customer_email = Column(String(255))
     start = Column(DateTime(timezone=True), nullable=False)
     end = Column(DateTime(timezone=True), nullable=False)
+    actual_start = Column(DateTime(timezone=True), nullable=False)
+    actual_end = Column(DateTime(timezone=True), nullable=False)
     duration_minutes = Column(Integer, nullable=False)
     notes = Column(Text)
     status = Column(String(50), default="pending")
@@ -96,6 +98,8 @@ class QueueEntry(Base):
     customer_phone = Column(String(50))
     start = Column(DateTime(timezone=True))
     end = Column(DateTime(timezone=True))
+    actual_start = Column(DateTime(timezone=True), nullable=False)
+    actual_end = Column(DateTime(timezone=True), nullable=False)
     duration_minutes = Column(Integer, nullable=False)
     position = Column(Integer, nullable=False)
     original_position = Column(Integer, nullable=False)
@@ -131,6 +135,8 @@ class ProviderSettings(Base):
 
     sms_credits_used = Column(Integer, default=0)
     sms_credits_reset = Column(DateTime, default=datetime.utcnow)
+
+    auto_complete_after_minutes = Column(Integer, default=20)
 
     queue_token = Column(String(64), unique=True, nullable=True)
 

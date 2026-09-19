@@ -1,5 +1,5 @@
 import smtplib
-from datetime import timedelta
+from datetime import timedelta, timezone
 from email.message import EmailMessage
 from flask import Flask, render_template, redirect, url_for, request, session, send_file, jsonify
 from flask_bcrypt import Bcrypt
@@ -1317,6 +1317,7 @@ def current_appointment():
 def update_status(type, id):
     data = request.get_json()
     status = data.get("status")
+    now = datetime.datetime.now(datetime.timezone.utc).astimezone().replace(second=0, microsecond=0)
 
     session_db = Session()
     try:
@@ -1336,7 +1337,12 @@ def update_status(type, id):
             emit_to_user("error", {"error": "Eintrag nicht gefunden."})
             return jsonify({"error": "Eintrag nicht gefunden."}), 404
 
-        # 2. Status aktualisieren
+        #if status == "in_progress" and not entry.actual_start:
+            #entry.actual_start = now
+
+        if status == "completed":
+            entry.actual_end = now
+
         entry.status = status
 
         if type == "Walk-in" and status == "completed":
@@ -1660,17 +1666,16 @@ def load_appointments_for_timeline(provider_id):
     appointments_list = []
 
     for a in appointments:
-        start = a.start.astimezone()
-        end = a.end.astimezone()
-
         appointments_list.append({
             "id": a.id,
             "type": "Termin",
             "customer_name": a.customer_name,
             "services": json.loads(a.services_json),
             "custom_duration": a.custom_duration,
-            "start": start,
-            "end": end,
+            "start": a.start.astimezone(),
+            "end": a.end.astimezone(),
+            "actual_start": a.actual_start.astimezone() if a.actual_start else None,
+            "actual_end": a.actual_end.astimezone() if a.actual_end else None,
             "phone": a.customer_phone,
             "email": a.customer_email,
             "duration": a.duration_minutes,
@@ -1692,6 +1697,8 @@ def load_queue_for_timeline(provider_id):
     for q in queues:
         start = q.start.astimezone() if q.start else None
         end = q.end.astimezone() if q.end else None
+        actual_start = q.start.astimezone() if q.actual_start else None
+        actual_end = q.end.astimezone() if q.actual_end else None
 
         queues_list.append({
             "id": q.id,
@@ -1702,6 +1709,8 @@ def load_queue_for_timeline(provider_id):
             "duration": q.duration_minutes,
             "start": start,
             "end": end,
+            "actual_start": actual_start,
+            "actual_end": actual_end,
             "created_at": q.created_at.astimezone(),
             "phone": q.customer_phone,
             "status": q.status,
@@ -1749,6 +1758,8 @@ def build_timeline(appointments, queue):
             "custom_duration": q["custom_duration"],
             "start": slot_start,
             "end": slot_end,
+            "actual_start": q["actual_start"],
+            "actual_end": q["actual_end"],
             "phone": q["phone"],
             "duration": q["duration"],
             "status": q["status"]
@@ -1811,17 +1822,18 @@ def get_timeline():
         calendar_events = []
         for item in events:
             if item["type"] == "Termin" and item["status"] in ("pending", "confirmed", "in_progress"):
-                if item["end"] <= now:
-                    session_db.query(Appointment).filter(
-                        Appointment.provider_id == provider_id,
-                        Appointment.id == item["id"]
-                    ).update({Appointment.status: "completed"})
+                 #if item["end"] <= now:
+                    #session_db.query(Appointment).filter(
+                        #Appointment.provider_id == provider_id,
+                        #Appointment.id == item["id"]
+                    #).update({Appointment.status: "completed"})
 
-                    session_db.commit()
+                    #session_db.commit()
 
-                    item["status"] = "completed"
+                    #item["status"] = "completed"
 
-                elif item["start"] <= now <= item["end"]:
+                 #if item["start"] <= now <= item["end"]:
+                 if item["start"] <= now and item["status"] != "completed":
                     session_db.query(Appointment).filter(
                         Appointment.provider_id == provider_id,
                         Appointment.id == item["id"]
@@ -1833,27 +1845,31 @@ def get_timeline():
 
 
             elif item["type"] == "Walk-in" and item["status"] in ("assigned", "in_progress"):
-                if item["end"] <= now:
-                    session_db.query(QueueEntry).filter(
-                        QueueEntry.provider_id == provider_id,
-                        QueueEntry.id == item["id"]
-                    ).update({QueueEntry.status: "completed"})
+                #if item["end"] <= now:
+                    #session_db.query(QueueEntry).filter(
+                        #QueueEntry.provider_id == provider_id,
+                        #QueueEntry.id == item["id"]
+                    #).update({QueueEntry.status: "completed"})
 
-                    session_db.commit()
+                    #session_db.commit()
 
-                    item["status"] = "completed"
+                    #item["status"] = "completed"
 
-                elif item["start"] <= now <= item["end"]:
+
+                #if item["start"] <= now <= item["end"]:
+                if item["start"] <= now and item["status"] != "completed":
                     session_db.query(QueueEntry).filter(
                         QueueEntry.provider_id == provider_id,
                         QueueEntry.id == item["id"]
                     ).update({QueueEntry.status: "in_progress"})
+
                     session_db.commit()
+
                     item["status"] = "in_progress"
 
 
             if item["type"] == "Walk-in":
-                if item["status"] not in ("completed", "no_show", "in_progress", "manual"):
+                if item["status"] not in ("completed", "no_show", "in_progress"):
                     session_db.query(QueueEntry).filter_by(
                         id=item["id"]
                     ).update({
@@ -1876,11 +1892,27 @@ def get_timeline():
                     else:
                         service_names = f"Custom ({item['custom_duration']} Min)"
 
+                effective_start = item["start"]
+                effective_end = item["end"]
+
+                # läuft gerade und überzieht
+                if item["status"] == "in_progress":
+                    effective_end = max(item["end"], now)
+
+                # bereits abgeschlossen und echte Zeiten vorhanden
+                elif (
+                        item["status"] == "completed"
+                        and item.get("actual_start")
+                        and item.get("actual_end")
+                ):
+                    effective_start = item["actual_start"]
+                    effective_end = item["actual_end"]
+
                 calendar_events.append({
                     "id": item["id"],
                     "title": item["customer_name"],
-                    "start": item["start"].isoformat(),
-                    "end": item["end"].isoformat(),
+                    "start": effective_start.isoformat(),
+                    "end": effective_end.isoformat(),
                     "color": "#1e88e5",
                     "extendedProps": {
                         "type": "Walk-in",
@@ -1908,11 +1940,27 @@ def get_timeline():
                     else:
                         service_names = f"Custom ({item['custom_duration']} Min)"
 
+                effective_start = item["start"]
+                effective_end = item["end"]
+
+                # läuft gerade und überzieht
+                if item["status"] == "in_progress":
+                    effective_end = max(item["end"], now)
+
+                # bereits abgeschlossen und echte Zeiten vorhanden
+                elif (
+                        item["status"] == "completed"
+                        and item.get("actual_start")
+                        and item.get("actual_end")
+                ):
+                    effective_start = item["actual_start"]
+                    effective_end = item["actual_end"]
+
                 calendar_events.append({
                     "id": item["id"],
                     "title": item["customer_name"],
-                    "start": item["start"].isoformat(),
-                    "end": item["end"].isoformat(),
+                    "start": effective_start.isoformat(),
+                    "end": effective_end.isoformat(),
                     "color": "#43a047",
                     "extendedProps": {
                         "type": "Termin",
@@ -2051,6 +2099,7 @@ def get_provider_profile():
             "sunday_closed": settings.sunday_closed,
             "queue_enabled": settings.queue_enabled,
             "queue_max_length": settings.queue_max_length,
+            "auto_complete_after_minutes": settings.auto_complete_after_minutes
         }
 
 
@@ -2321,11 +2370,9 @@ def save_business_info():
         return jsonify({"message": "Erfolgreich gespeichert."}), 200
 
     except Exception as e:
-        print(e)
-        emit_to_user("error", {
-            "error": "Es ist ein Fehler aufgetreten. Bitte versuchen Sie es später erneut."
-        })
-        return jsonify({"error": str(e)}), 500
+        session_db.rollback()
+        print("DB ERROR:", e)
+        return jsonify({"error": "Interner Serverfehler beim Speichern der Unternehmensdaten."}), 500
 
     finally:
         session_db.close()
@@ -2542,11 +2589,9 @@ def save_services():
         return jsonify({"message": "Services erfolgreich gespeichert."}), 200
 
     except Exception as e:
-        print(e)
-        emit_to_user("error", {
-            "error": "Beim Speichern deiner Services ist ein Fehler aufgetreten."
-        })
-        return jsonify({"error": str(e)}), 500
+        session_db.rollback()
+        print("DB ERROR:", e)
+        return jsonify({"error": "Interner Serverfehler beim Speichern der Services."}), 500
 
     finally:
         session_db.close()
@@ -2586,11 +2631,9 @@ def save_staff():
         return jsonify({"message": "Personal erfolgreich gespeichert."}), 200
 
     except Exception as e:
-        print(e)
-        emit_to_user("error", {
-            "error": "Beim Speichern deines Personals ist ein Fehler aufgetreten."
-        })
-        return jsonify({"error": str(e)}), 500
+        session_db.rollback()
+        print("DB ERROR:", e)
+        return jsonify({"error": "Interner Serverfehler beim Speichern des Personals."}), 500
 
     finally:
         session_db.close()
@@ -2799,11 +2842,9 @@ def save_email_reminder_settings():
 
 
     except Exception as e:
-        print(e)
-        emit_to_user("error", {
-            "error": "Etwas ist schiefgelaufen. Deine Änderungen wurden nicht gespeichert."
-        })
-        return jsonify({"error": str(e)}), 500
+        session_db.rollback()
+        print("DB ERROR:", e)
+        return jsonify({"error": "Interner Serverfehler beim Speichern."}), 500
 
     finally:
         session_db.close()
@@ -2846,11 +2887,9 @@ def save_opening_hours_settings():
 
 
     except Exception as e:
-        print(e)
-        emit_to_user("error", {
-            "error": "Etwas ist schiefgelaufen. Deine Änderungen wurden nicht gespeichert."
-        })
-        return jsonify({"error": str(e)}), 500
+        session_db.rollback()
+        print("DB ERROR:", e)
+        return jsonify({"error": "Interner Serverfehler beim Speichern."}), 500
 
     finally:
         session_db.close()
@@ -2886,11 +2925,9 @@ def save_queue_settings():
 
 
     except Exception as e:
-        print(e)
-        emit_to_user("error", {
-            "error": "Etwas ist schiefgelaufen. Deine Änderungen wurden nicht gespeichert."
-        })
-        return jsonify({"error": str(e)}), 500
+        session_db.rollback()
+        print("DB ERROR:", e)
+        return jsonify({"error": "Interner Serverfehler beim Speichern."}), 500
 
     finally:
         session_db.close()
@@ -2924,11 +2961,9 @@ def save_sms_settings():
 
 
     except Exception as e:
-        print(e)
-        emit_to_user("error", {
-            "error": "Etwas ist schiefgelaufen. Deine Änderungen wurden nicht gespeichert."
-        })
-        return jsonify({"error": str(e)}), 500
+        session_db.rollback()
+        print("DB ERROR:", e)
+        return jsonify({"error": "Interner Serverfehler beim Speichern."}), 500
 
     finally:
         session_db.close()
@@ -3019,8 +3054,8 @@ def qr_image():
 
 
     except Exception as e:
-        print(e)
-        return jsonify({"error": str(e)}), 500
+        print("QR GENERATION ERROR:", e)
+        return jsonify({"error": "Interner Serverfehler beim Erstellen des QR-Codes."}), 500
 
 
 @app.route("/queue/<string:token>") # Room muss anders sein! Weil sonst sieht man Errors im Dashboard
@@ -3152,8 +3187,9 @@ def customer_join_queue(token):
         return jsonify({"queue_id": queue_id}), 200
 
     except Exception as e:
-        print(e)
-        return jsonify({"error": "Etwas ist schiefgelaufen. Bitte versuche es erneut."}), 500
+        session_db.rollback()
+        print("DB ERROR:", e)
+        return jsonify({"error": "Interner Serverfehler beim Speichern."}), 500
 
     finally:
         session_db.close()
@@ -3187,8 +3223,8 @@ def customer_queue_status(token, queue_id):
                queue_id=queue_id,
        )
     except Exception as e:
-        print(e)
-        return jsonify({"error": str(e)}), 500
+        print("DB ERROR:", e)
+        return jsonify({"error": "Interner Serverfehler beim Speichern."}), 500
 
     finally:
         session_db.close()
@@ -3298,15 +3334,15 @@ def customer_appointment_status(token):
             return render_template("appointment_invalid.html"), 404
 
         return render_template("customer_appointment_status.html",
-           token=token,
-           appointment_id=appointment.id
-       )
+               token=token,
+               appointment=appointment
+        )
 
     finally:
         session_db.close()
 
-@app.route("/appointment/<string:token>/status/<int:queue_id>/data")
-def customer_appointment_status_data(token, appointment_id):
+@app.route("/appointment/<string:token>/status/data")
+def customer_appointment_status_data(token):
     statusMap = {
         "pending": "Ausstehend",
         "no_show": "Nicht erschienen",
@@ -3340,7 +3376,7 @@ def customer_appointment_status_data(token, appointment_id):
 
             if end_aware < now:
                 session_db.query(Appointment).filter_by(
-                    id=appointment_id,
+                    id=appointment.id,
                     provider_id=appointment.provider_id
                 ).update({Appointment.status: "completed"})
 
@@ -3350,7 +3386,7 @@ def customer_appointment_status_data(token, appointment_id):
 
             if start_aware <= now <= end_aware:
                 session_db.query(Appointment).filter_by(
-                    id=appointment_id,
+                    id=appointment.id,
                     provider_id=appointment.provider_id
                 ).update({Appointment.status: "in_progress"})
 
@@ -3375,6 +3411,34 @@ def customer_appointment_status_data(token, appointment_id):
     finally:
         session_db.close()
 
+@app.route("/dashboard/settings/auto_complete/save", methods=["POST"])
+@login_required
+def save_auto_complete_settings():
+    data = request.get_json()
+    minutes = data.get("auto_complete_after_minutes", 20)
+
+    minutes = max(5, min(60, int(minutes)))
+
+    session_db = Session()
+    try:
+        session_db.query(ProviderSettings).filter_by(
+            provider_id=current_user.id
+        ).update({
+            ProviderSettings.auto_complete_after_minutes: minutes
+        })
+
+        session_db.commit()
+
+        emit_to_user("message", {"message": "Terminregeln gespeichert."})
+        return jsonify({"message": "ok"}), 200
+
+    except Exception as e:
+        session_db.rollback()
+        print("DB ERROR:", e)
+        return jsonify({"error": "Interner Serverfehler beim Speichern."}), 500
+
+    finally:
+        session_db.close()
 
 
 @app.route("/dashboard/upgrade")
