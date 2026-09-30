@@ -774,7 +774,7 @@
   let popupTimeout = null;
   let appointmentErrorMsgTimeout = null;
   let queueErrorMsgTimeout = null;
-  let sidebarTimeout = null;
+  // let sidebarTimeout = null;
   let currentAppointmentId = null;
   let walkinEnabled = true;
   const state = { calendar: null };
@@ -966,15 +966,16 @@
       eventsSet() {
         refreshDashboard();
         refreshQueue();
-        clearTimeout(sidebarTimeout);
-        sidebarTimeout = null;
+        // clearTimeout(sidebarTimeout);
+        // sidebarTimeout = null;
 
-        scheduleNextUpdate();
+        // scheduleNextUpdate();
       }
     });
 
     state.calendar = calendar;
     calendar.render();
+    scheduleMinuteSync();
   });
 
   // ── WebSocket ────────────────────────────────────────────────
@@ -1012,6 +1013,21 @@
   });
 
   // ── Actions ──────────────────────────────────────────────────
+  function scheduleMinuteSync() {
+    const now = new Date();
+    const msUntilNextMinute = (60 - now.getSeconds()) * 1000 - now.getMilliseconds();
+
+    setTimeout(() => {
+      state.calendar.refetchEvents();
+
+      setInterval(() => {
+        state.calendar.refetchEvents();
+      }, 60000);
+
+
+    }, msUntilNextMinute);
+  }
+
   async function submitForm(actionUrl, type) {
     let customDuration = null;
     let hasServiceInSystem = false;
@@ -1083,7 +1099,7 @@
     }
   }
 
-  async function scheduleNextUpdate() {
+  /* async function scheduleNextUpdate() {
     const next = (await getNextAppointments())[0];
     const current = await getCurrentAppointments();
     const now = new Date();
@@ -1114,7 +1130,7 @@
       console.log("Ausgeführt");
       state.calendar.refetchEvents();
     }, diff);
-  }
+  } */
 
   async function refreshQueue() {
     const res = await fetch('/dashboard/queue/load', { method: "GET" });

@@ -908,7 +908,7 @@ def move_appointment(appointment_id, type):
             })
             return jsonify({"error": "Termin nicht gefunden."}), 404
 
-        if appointment.start.astimezone() <= now:
+        if appointment.start.astimezone() <= now and appointment.status == "in_progress":
             emit_to_user("error", {
                 "error": "Vergangene oder laufende Termine können nicht verschoben werden."
             })
@@ -1035,7 +1035,7 @@ def delete_appointment(appointment_id):
             })
             return jsonify({"error": "Termin nicht gefunden."}), 400
 
-        if appointment.start.astimezone() <= now:
+        if appointment.start.astimezone() <= now and appointment.status == "in_progress":
             emit_to_user("error", {
                 "error": "Vergangene oder laufende Termine können nicht gelöscht werden."
             })
@@ -1126,8 +1126,9 @@ def next_appointment():
 
     appointments = session_db.query(Appointment).filter(
         Appointment.provider_id == current_user.id,
-        Appointment.start > now,
-        Appointment.status != "completed"
+        Appointment.status.not_in(["in_progress", "completed", "no_show"])
+        #Appointment.start > now,
+        #Appointment.status != "completed"
     ).all()
 
     appointments_fc = []
@@ -1165,8 +1166,9 @@ def next_appointment():
 
     queues = session_db.query(QueueEntry).filter(
         QueueEntry.provider_id == current_user.id,
-        QueueEntry.start > now,
-        QueueEntry.status != "completed"
+        QueueEntry.status.not_in(["in_progress", "completed", "no_show"])
+        #QueueEntry.start > now,
+        #QueueEntry.status != "completed"
     ).all()
 
     queues_fc = []
@@ -1221,16 +1223,18 @@ def current_appointment():
 
     appointment = session_db.query(Appointment).filter(
         Appointment.provider_id == current_user.id,
-        Appointment.start <= now,
-        Appointment.end >= now,
-        Appointment.status.not_in(["completed", "no_show"])
+        #Appointment.start <= now,
+        #Appointment.end >= now,
+        Appointment.status == "in_progress"
+        #Appointment.status.not_in(["completed", "no_show"])
     ).first()
 
     walkin = session_db.query(QueueEntry).filter(
         QueueEntry.provider_id == current_user.id,
-        QueueEntry.start <= now,
-        QueueEntry.end >= now,
-        QueueEntry.status.in_(["assigned", "in_progress"])
+        #QueueEntry.start <= now,
+        #QueueEntry.end >= now,
+        QueueEntry.status == "in_progress"
+        #QueueEntry.status.in_(["assigned", "in_progress"])
     ).first()
 
     if appointment:
@@ -1341,6 +1345,9 @@ def update_status(type, id):
             #entry.actual_start = now
 
         if status == "completed":
+            if not entry.actual_start:
+                entry.actual_start = entry.start
+
             entry.actual_end = now
 
         entry.status = status
@@ -1375,11 +1382,6 @@ def update_status(type, id):
         # 3. Wenn ein Termin/Walk‑in auf "in_progress" gesetzt wird:
         #    → alle anderen aktiven Einträge zurücksetzen
         if status == "in_progress":
-            session_db.query(Appointment).filter(
-                Appointment.provider_id == current_user.id,
-                Appointment.status == "in_progress",
-                Appointment.id != entry.id
-            ).update({Appointment.status: "assigned"})
 
             session_db.query(QueueEntry).filter(
                 QueueEntry.provider_id == current_user.id,
@@ -1697,8 +1699,8 @@ def load_queue_for_timeline(provider_id):
     for q in queues:
         start = q.start.astimezone() if q.start else None
         end = q.end.astimezone() if q.end else None
-        actual_start = q.start.astimezone() if q.actual_start else None
-        actual_end = q.end.astimezone() if q.actual_end else None
+        actual_start = q.actual_start.astimezone() if q.actual_start else None
+        actual_end = q.actual_end.astimezone() if q.actual_end else None
 
         queues_list.append({
             "id": q.id,
@@ -1724,8 +1726,8 @@ def build_timeline(appointments, queue):
     now = datetime.datetime.now(datetime.timezone.utc).astimezone().replace(second=0, microsecond=0)
 
     # 1. Termine und Walkins sortieren und Vergangene Termine filtern
-    appointments = sorted([a for a in appointments if a["status"] not in ("completed", "no_show")], key=lambda x: x["start"])
-    queues = sorted([q for q in queue if q["status"] not in ("completed", "no_show")], key=lambda x: x["position"])
+    appointments = sorted([a for a in appointments if a["status"] != "no_show"], key=lambda x: x["start"])
+    queues = sorted([q for q in queue if q["status"] != "no_show"], key=lambda x: x["position"])
 
     session_db = Session()
 
@@ -1768,6 +1770,53 @@ def build_timeline(appointments, queue):
     # 4. Termine + Walk‑ins zusammenführen
     all_events = appointments + timeline
     all_events.sort(key=lambda x: x["start"])
+
+    virtual_free_at = None
+
+    for event in all_events:
+        duration = datetime.timedelta(minutes=event["duration"])
+
+        if event["status"] == "in_progress":
+            event["effective_start"] = event["start"]
+
+            event["effective_end"] = max(
+                event["end"],
+                now
+            )
+
+            virtual_free_at = event["effective_end"]
+
+            continue
+
+        if (
+                event["status"] == "completed"
+                and event.get("actual_start")
+                and event.get("actual_end")
+        ):
+            event["effective_start"] = event["actual_start"]
+            event["effective_end"] = event["actual_end"]
+            virtual_free_at = event["effective_end"]
+
+            continue
+
+        if (
+                virtual_free_at and event["status"]
+                not in ("in_progress", "completed")
+        ):
+
+            event["effective_start"] = max(
+                event["start"],
+                virtual_free_at
+            )
+
+            event["effective_end"] = event["effective_start"] + duration
+
+            virtual_free_at = event["effective_end"]
+
+        else:
+            event["effective_start"] = event["start"]
+            event["effective_end"] = event["end"]
+
 
     session_db.close()
     return all_events
@@ -1812,16 +1861,41 @@ def get_timeline():
         appointments = load_appointments_for_timeline(provider_id)
         queue = load_queue_for_timeline(provider_id)
 
-        completed_appointments = [a for a in appointments if a["status"] == "completed"]
-        completed_walkins = [q for q in queue if q["status"] == "completed"]
+        #completed_appointments = [a for a in appointments if a["status"] == "completed"]
+        #completed_walkins = [q for q in queue if q["status"] == "completed"]
 
         events = build_timeline(appointments, queue)
-        events += completed_appointments + completed_walkins
-        events.sort(key=lambda x: x["start"])
+        #events += completed_appointments + completed_walkins
+        events.sort(key=lambda x: x["effective_start"])
 
         calendar_events = []
+
+        active_events = [e for e in events if e["status"] == "in_progress"]
+
         for item in events:
             if item["type"] == "Termin" and item["status"] in ("pending", "confirmed", "in_progress"):
+                effective_start = item.get(
+                    "effective_start",
+                    item["start"]
+                )
+
+
+                if (
+                        effective_start <= now
+                        and item["status"] in ("pending", "confirmed")
+                        and not active_events
+                ):
+                    session_db.query(Appointment).filter(
+                        Appointment.provider_id == provider_id,
+                        Appointment.id == item["id"]
+                    ).update({
+                        Appointment.status: "in_progress"
+                    })
+
+                    session_db.commit()
+
+                    item["status"] = "in_progress"
+
                  #if item["end"] <= now:
                     #session_db.query(Appointment).filter(
                         #Appointment.provider_id == provider_id,
@@ -1833,18 +1907,40 @@ def get_timeline():
                     #item["status"] = "completed"
 
                  #if item["start"] <= now <= item["end"]:
-                 if item["start"] <= now and item["status"] != "completed":
-                    session_db.query(Appointment).filter(
-                        Appointment.provider_id == provider_id,
-                        Appointment.id == item["id"]
-                    ).update({Appointment.status: "in_progress"})
+                 #if item["start"] <= now and item["status"] != "completed":
+                    #session_db.query(Appointment).filter(
+                        #Appointment.provider_id == provider_id,
+                        #Appointment.id == item["id"]
+                    #).update({Appointment.status: "in_progress"})
+
+                    #session_db.commit()
+
+                    #item["status"] = "in_progress"
+
+            #elif item["type"] == "Walk-in" and item["status"] in ("assigned", "in_progress"):
+            elif item["type"] == "Walk-in" and item["status"] == "assigned":
+                effective_start = item.get(
+                    "effective_start",
+                    item["start"]
+                )
+
+                if (
+                        effective_start <= now
+                        and item["status"] == "assigned"
+                        and not active_events
+                ):
+
+                    session_db.query(QueueEntry).filter(
+                        QueueEntry.provider_id == provider_id,
+                        QueueEntry.id == item["id"]
+                    ).update({
+                        QueueEntry.status: "in_progress"
+                    })
 
                     session_db.commit()
 
                     item["status"] = "in_progress"
 
-
-            elif item["type"] == "Walk-in" and item["status"] in ("assigned", "in_progress"):
                 #if item["end"] <= now:
                     #session_db.query(QueueEntry).filter(
                         #QueueEntry.provider_id == provider_id,
@@ -1857,15 +1953,15 @@ def get_timeline():
 
 
                 #if item["start"] <= now <= item["end"]:
-                if item["start"] <= now and item["status"] != "completed":
-                    session_db.query(QueueEntry).filter(
-                        QueueEntry.provider_id == provider_id,
-                        QueueEntry.id == item["id"]
-                    ).update({QueueEntry.status: "in_progress"})
+                #if item["start"] <= now and item["status"] != "completed": # Darf so nicht sein siehe Copilot
+                    #session_db.query(QueueEntry).filter(
+                        #QueueEntry.provider_id == provider_id,
+                        #QueueEntry.id == item["id"]
+                    #).update({QueueEntry.status: "in_progress"})
 
-                    session_db.commit()
+                    #session_db.commit()
 
-                    item["status"] = "in_progress"
+                    #item["status"] = "in_progress"
 
 
             if item["type"] == "Walk-in":
@@ -1892,21 +1988,15 @@ def get_timeline():
                     else:
                         service_names = f"Custom ({item['custom_duration']} Min)"
 
-                effective_start = item["start"]
-                effective_end = item["end"]
+                effective_start = item.get(
+                    "effective_start",
+                    item["start"]
+                )
 
-                # läuft gerade und überzieht
-                if item["status"] == "in_progress":
-                    effective_end = max(item["end"], now)
-
-                # bereits abgeschlossen und echte Zeiten vorhanden
-                elif (
-                        item["status"] == "completed"
-                        and item.get("actual_start")
-                        and item.get("actual_end")
-                ):
-                    effective_start = item["actual_start"]
-                    effective_end = item["actual_end"]
+                effective_end = item.get(
+                    "effective_end",
+                    item["end"]
+                )
 
                 calendar_events.append({
                     "id": item["id"],
@@ -1940,21 +2030,15 @@ def get_timeline():
                     else:
                         service_names = f"Custom ({item['custom_duration']} Min)"
 
-                effective_start = item["start"]
-                effective_end = item["end"]
+                effective_start = item.get(
+                    "effective_start",
+                    item["start"]
+                )
 
-                # läuft gerade und überzieht
-                if item["status"] == "in_progress":
-                    effective_end = max(item["end"], now)
-
-                # bereits abgeschlossen und echte Zeiten vorhanden
-                elif (
-                        item["status"] == "completed"
-                        and item.get("actual_start")
-                        and item.get("actual_end")
-                ):
-                    effective_start = item["actual_start"]
-                    effective_end = item["actual_end"]
+                effective_end = item.get(
+                    "effective_end",
+                    item["end"]
+                )
 
                 calendar_events.append({
                     "id": item["id"],
@@ -2639,12 +2723,38 @@ def save_staff():
         session_db.close()
 
 def reminder_worker():
+    aligned_to_minute = False
+
     while True:
         session_db = Session()
         try:
             now = datetime.datetime.now(datetime.timezone.utc).astimezone().replace(microsecond=0, second=0)
             in_24h = now + datetime.timedelta(hours=24)
             in_3h = now + datetime.timedelta(hours=3)
+
+            active_appts = session_db.query(Appointment).filter_by(status="in_progress").all()
+            active_queue = session_db.query(QueueEntry).filter_by(status="in_progress").all()
+
+            active_events = active_appts + active_queue
+
+            for e in active_events:
+                settings = session_db.query(ProviderSettings).filter_by(
+                    provider_id=e.provider_id
+                ).first()
+
+                fallback_minutes = settings.auto_complete_after_minutes if settings else 2
+                scheduled_end = e.end.astimezone()
+                overrun_minutes = (now - scheduled_end).total_seconds() / 60
+
+                if overrun_minutes > fallback_minutes:
+                    e.status = "completed"
+
+                    if not e.actual_start:
+                        e.actual_start = e.start
+
+                    e.actual_end = now
+                    session_db.commit()
+
             
             now_ = time.time()
             for data in [registration_data, password_reset_data]:
@@ -2705,7 +2815,14 @@ def reminder_worker():
         finally:
             session_db.close()
 
-        time.sleep(60)
+        now = datetime.datetime.now()
+        sleep_seconds = 60
+
+        if not aligned_to_minute:
+            sleep_seconds = 60 - now.second - now.microsecond / 1000000
+            aligned_to_minute = True
+
+        time.sleep(sleep_seconds)
 
 def send_reminder_email(appointment, timing):
     YOUR_EMAIL = os.getenv("SMTP_EMAIL")
@@ -3255,15 +3372,20 @@ def customer_queue_status_data(token, queue_id):
 
         appointments = load_appointments_for_timeline(settings.provider_id)
         queue = load_queue_for_timeline(settings.provider_id)
+        #events = build_timeline(
+            #appointments,
+            #queue
+        #)
 
-        combine = appointments + queue
-        combine.sort(key=lambda x: x["start"])
-        combine = [event for event in combine if event["status"] not in ["completed", "no_show"]]
+        event = appointments + queue
+        event.sort(key=lambda x: x["start"])
+        event = [e for e in event if e["status"] not in ["completed", "no_show"]]
+        active_events = [e for e in event if e["status"] == "in_progress"]
 
-        for item in combine:
+        for item in event:
             if item["type"] == "Walk-in":
                 if item["id"] == queue_id:
-                    entry.position_with_appointments = combine.index(item) + 1
+                    entry.position_with_appointments = event.index(item) + 1
 
         if not entry:
             return jsonify({"error": "Nicht gefunden"}), 404
@@ -3292,7 +3414,7 @@ def customer_queue_status_data(token, queue_id):
 
                 entry.status = "completed"
 
-            if start_aware <= now <= end_aware:
+            if start_aware <= now <= end_aware and not active_events:
                 session_db.query(QueueEntry).filter_by(
                     id=queue_id,
                     provider_id=settings.provider_id
