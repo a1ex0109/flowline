@@ -3597,4 +3597,8 @@ def upgrade():
 reminder_thread = threading.Thread(target=reminder_worker, daemon=True)
 reminder_thread.start()
 
-socketio.run(app, use_reloader=True, debug=True, allow_unsafe_werkzeug=True, port=6060)
+#socketio.run(app, use_reloader=True, debug=True, allow_unsafe_werkzeug=True, port=6060)
+
+if __name__ == '__main__':
+    port = int(os.environ.get("PORT", 5000))
+    socketio.run(app, host="0.0.0.0", port=port, debug=True)
