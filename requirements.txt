@@ -4,3 +4,5 @@ flask-bcrypt
 flask-socketio
 sqlalchemy
 python-dotenv
+gunicorn
+
