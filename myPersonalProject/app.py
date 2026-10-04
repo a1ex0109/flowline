@@ -1314,11 +1314,26 @@ def current_appointment():
         "data": None
     })
 
+def shift_queue_positions(session_db, provider_id, completed_position):
+    position = completed_position.position  # Neu
 
+    queues = session_db.query(QueueEntry).filter(
+        QueueEntry.provider_id == provider_id,
+        QueueEntry.position > position
+    ).all()
+
+    for q in queues:
+        q.position -= 1
+        q.original_position -= 1
+
+        q.start = None
+        q.end = None
+        q.status = "pending"
 
 @app.route("/dashboard/appointments/<string:type>/<int:id>/update-status", methods=["PATCH"])
 @login_required
 def update_status(type, id):
+    print(type)
     data = request.get_json()
     status = data.get("status")
     now = datetime.datetime.now(datetime.timezone.utc).astimezone().replace(second=0, microsecond=0)
@@ -1348,7 +1363,10 @@ def update_status(type, id):
             if not entry.actual_start:
                 entry.actual_start = entry.start
 
-            entry.actual_end = now
+            entry.actual_end = max(entry.end.astimezone(), now)
+
+            if type == "Walk-in":
+                shift_queue_positions(session_db, current_user.id, entry)
 
         entry.status = status
 
@@ -1401,7 +1419,6 @@ def update_status(type, id):
 
     finally:
         session_db.close()
-
 
 @app.route("/dashboard/queue/add", methods=["POST"])
 @login_required
@@ -1501,7 +1518,7 @@ def add_to_queue():
 @app.route("/dashboard/queue/load", methods=["GET"])
 @login_required
 def load_queue():
-    now = datetime.datetime.now(datetime.timezone.utc).astimezone().replace(second=0, microsecond=0)
+    #now = datetime.datetime.now(datetime.timezone.utc).astimezone().replace(second=0, microsecond=0)
 
     session_db = Session()
     try:
@@ -1510,11 +1527,9 @@ def load_queue():
         ).order_by(QueueEntry.position.asc()).all()
 
         queue = []
-        updates = []
+        #updates = []
 
         for q in queues:
-            status = q.status
-
             service = session_db.query(ProviderService).filter(
                 ProviderService.id.in_(json.loads(q.services_json))
             ).all()
@@ -1528,10 +1543,10 @@ def load_queue():
                     service_names = f"Custom ({q.custom_duration} Min)"
 
             # Prüfen ob assigned Zeitraum aktiv ist
-            if q.start and q.end and status == "assigned":
-                if q.start.astimezone() <= now <= q.end.astimezone():
-                    status = "in_progress"
-                    updates.append((status, q.id))
+            #if q.start and q.end and status == "assigned":
+                #if q.start.astimezone() <= now <= q.end.astimezone():
+                    #status = "in_progress"
+                    #updates.append((status, q.id))
 
             queue.append({
                 "customer_name": q.customer_name,
@@ -1539,17 +1554,17 @@ def load_queue():
                 "duration": q.duration_minutes,
                 "position": q.position,
                 "queue_id": q.id,
-                "status": status
+                "status": q.status
             })
 
-        if updates:
-            for status, queue_id in updates:
-                session_db.query(QueueEntry).filter(
-                    QueueEntry.id == queue_id,
-                    QueueEntry.provider_id == current_user.id
-                ).update({QueueEntry.status: status})
+        #if updates:
+            #for status, queue_id in updates:
+                #session_db.query(QueueEntry).filter(
+                    #QueueEntry.id == queue_id,
+                    #QueueEntry.provider_id == current_user.id
+                #).update({QueueEntry.status: status})
 
-            session_db.commit()
+            #session_db.commit()
 
 
         return jsonify(queue), 200
@@ -1570,31 +1585,18 @@ def remove_from_queue(queue_id):
 
     session_db = Session()
     try:
-        queue = session_db.query(QueueEntry).filter_by(
+        entry = session_db.query(QueueEntry).filter_by(
             id=queue_id,
             provider_id=current_user.id
         ).first()
 
-        if not queue:
+        if not entry:
             emit_to_user("error", {"error": "Eintrag nicht gefunden."})
             return jsonify({"error": "Eintrag nicht gefunden."}), 404
 
-        position = queue.position
+        session_db.delete(entry)
 
-        session_db.delete(queue)
-
-        queues = session_db.query(QueueEntry).filter(
-            QueueEntry.provider_id == current_user.id,
-            QueueEntry.position > position
-        ).all()
-
-        for q in queues:
-            q.position -= 1
-            q.original_position -= 1
-
-            q.start = None
-            q.end = None
-            q.status = "pending"
+        shift_queue_positions(session_db, current_user.id, entry)
 
         session_db.commit()
 
@@ -1726,17 +1728,17 @@ def build_timeline(appointments, queue):
     now = datetime.datetime.now(datetime.timezone.utc).astimezone().replace(second=0, microsecond=0)
 
     # 1. Termine und Walkins sortieren und Vergangene Termine filtern
-    appointments = sorted([a for a in appointments if a["status"] != "no_show"], key=lambda x: x["start"])
-    queues = sorted([q for q in queue if q["status"] != "no_show"], key=lambda x: x["position"])
+    filtered_appointments = sorted([a for a in appointments if a["status"] not in ["completed", "no_show"]], key=lambda x: x["start"])
+    filtered_queue = sorted([q for q in queue if q["status"] not in ["completed", "no_show"]], key=lambda x: x["position"])
 
     session_db = Session()
 
     # 3. Walk‑ins automatisch einplanen
-    for q in queues:
+    for q in filtered_queue:
         duration = datetime.timedelta(minutes=q["duration"])
         status = q["status"]
         if status not in ("completed", "no_show", "in_progress"):
-            slot_start = find_free_slot(now, duration, appointments, timeline)
+            slot_start = find_free_slot(now, duration, filtered_appointments, timeline)
             slot_end = slot_start + duration
 
             session_db.query(QueueEntry).filter_by(
@@ -1749,8 +1751,12 @@ def build_timeline(appointments, queue):
             session_db.commit()
 
         else:
-            slot_start = q["start"].replace(second=0, microsecond=0)
-            slot_end = q["end"].replace(second=0, microsecond=0)
+            if q["status"] == "completed":
+                slot_start = q["actual_start"].replace(second=0, microsecond=0)
+                slot_end = q["actual_end"].replace(second=0, microsecond=0)
+            else:
+                slot_start = q["start"].replace(second=0, microsecond=0)
+                slot_end = q["end"].replace(second=0, microsecond=0)
 
         timeline.append({
             "id": q["id"],
@@ -1767,8 +1773,9 @@ def build_timeline(appointments, queue):
             "status": q["status"]
         })
 
-    # 4. Termine + Walk‑ins zusammenführen
-    all_events = appointments + timeline
+    completed_appointments = [a for a in appointments if a["status"] == "completed"]
+    completed_walkins = [q for q in queue if q["status"] == "completed"]
+    all_events = appointments + timeline + completed_appointments + completed_walkins
     all_events.sort(key=lambda x: x["start"])
 
     virtual_free_at = None
@@ -1795,7 +1802,7 @@ def build_timeline(appointments, queue):
         ):
             event["effective_start"] = event["actual_start"]
             event["effective_end"] = event["actual_end"]
-            virtual_free_at = event["effective_end"]
+            virtual_free_at = now
 
             continue
 
@@ -1861,11 +1868,7 @@ def get_timeline():
         appointments = load_appointments_for_timeline(provider_id)
         queue = load_queue_for_timeline(provider_id)
 
-        #completed_appointments = [a for a in appointments if a["status"] == "completed"]
-        #completed_walkins = [q for q in queue if q["status"] == "completed"]
-
         events = build_timeline(appointments, queue)
-        #events += completed_appointments + completed_walkins
         events.sort(key=lambda x: x["effective_start"])
 
         calendar_events = []
@@ -2742,7 +2745,7 @@ def reminder_worker():
                     provider_id=e.provider_id
                 ).first()
 
-                fallback_minutes = settings.auto_complete_after_minutes if settings else 2
+                fallback_minutes = settings.auto_complete_after_minutes if settings else 20
                 scheduled_end = e.end.astimezone()
                 overrun_minutes = (now - scheduled_end).total_seconds() / 60
 
@@ -2753,9 +2756,12 @@ def reminder_worker():
                         e.actual_start = e.start
 
                     e.actual_end = now
-                    session_db.commit()
 
-            
+                    if isinstance(e, QueueEntry):
+                        shift_queue_positions(session_db, e.provider_id, e)
+
+                    session_db.commit()
+                    
             now_ = time.time()
             for data in [registration_data, password_reset_data]:
                 expired = [k for k, v in data.items() if now_ - v.get("created_at", now_) > 600]
@@ -3372,15 +3378,17 @@ def customer_queue_status_data(token, queue_id):
 
         appointments = load_appointments_for_timeline(settings.provider_id)
         queue = load_queue_for_timeline(settings.provider_id)
-        #events = build_timeline(
-            #appointments,
-            #queue
-        #)
+        events = build_timeline(
+            appointments,
+            queue
+        )
 
-        event = appointments + queue
-        event.sort(key=lambda x: x["start"])
-        event = [e for e in event if e["status"] not in ["completed", "no_show"]]
+        #event = appointments + queue
+        #event.sort(key=lambda x: x["start"])
+        event = [e for e in events if e["status"] not in ["completed", "no_show"]]
         active_events = [e for e in event if e["status"] == "in_progress"]
+        current_event = next((e for e in event if e["type"] == "Walk-in" and e["id"] == queue_id), None)
+
 
         for item in event:
             if item["type"] == "Walk-in":
@@ -3397,14 +3405,18 @@ def customer_queue_status_data(token, queue_id):
             return jsonify({"status": statusMap["no_show"]}), 200
 
         estimated_minutes = None
+        is_delayed = False
+
         if entry.start:
-            start_aware = entry.start.astimezone()
-            end_aware = entry.end.astimezone()
+            effective_start =  current_event["effective_start"]
+            effective_end =  current_event["effective_end"]
             now = datetime.datetime.now(datetime.timezone.utc).astimezone().replace(second=0, microsecond=0)
-            diff_seconds = (start_aware - now).total_seconds()
+            diff_seconds = (effective_start - now).total_seconds()
             estimated_minutes = max(round(int(diff_seconds) / 60), 0)
 
-            if end_aware < now:
+            is_delayed = True if estimated_minutes == 0 else False
+
+            if effective_end < now:
                 session_db.query(QueueEntry).filter_by(
                     id=queue_id,
                     provider_id=settings.provider_id
@@ -3414,7 +3426,7 @@ def customer_queue_status_data(token, queue_id):
 
                 entry.status = "completed"
 
-            if start_aware <= now <= end_aware and not active_events:
+            if effective_start <= now <= effective_end and not active_events:
                 session_db.query(QueueEntry).filter_by(
                     id=queue_id,
                     provider_id=settings.provider_id
@@ -3429,7 +3441,8 @@ def customer_queue_status_data(token, queue_id):
                 "name": entry.customer_name,
                 "status": statusMap[f"{entry.status}"],
                 "position": entry.position,
-                "estimated_wait_minutes": estimated_minutes
+                "estimated_wait_minutes": estimated_minutes,
+                "is_delayed": is_delayed
             }), 200
 
         else:
@@ -3437,9 +3450,14 @@ def customer_queue_status_data(token, queue_id):
                 "name": entry.customer_name,
                 "status": statusMap[f"{entry.status}"],
                 "position": entry.position_with_appointments,
-                "estimated_wait_minutes": estimated_minutes
+                "estimated_wait_minutes": estimated_minutes,
+                "is_delayed": is_delayed
             }), 200
 
+    except Exception as e:
+        session_db.rollback()
+        print("ERROR:", e)
+        return jsonify({"error": "Interner Serverfehler."}), 500
     finally:
         session_db.close()
 
@@ -3489,12 +3507,16 @@ def customer_appointment_status_data(token):
             return jsonify({"status": statusMap["no_show"]}), 200
 
         estimated_minutes = None
+        is_delayed = False
+
         if appointment.start:
             start_aware = appointment.start.astimezone()
             end_aware = appointment.end.astimezone()
             now = datetime.datetime.now(datetime.timezone.utc).astimezone().replace(second=0, microsecond=0)
             diff_seconds = (start_aware - now).total_seconds()
             estimated_minutes = max(round(int(diff_seconds) / 60), 0)
+
+            is_delayed = True if estimated_minutes == 0 else False
 
             if end_aware < now:
                 session_db.query(Appointment).filter_by(
@@ -3520,14 +3542,16 @@ def customer_appointment_status_data(token):
             return jsonify({
                 "name": appointment.customer_name,
                 "status": statusMap[f"{appointment.status}"],
-                "estimated_wait_minutes": estimated_minutes
+                "estimated_wait_minutes": estimated_minutes,
+                "is_delayed": is_delayed
             }), 200
 
         else:
             return jsonify({
                 "name": appointment.customer_name,
                 "status": statusMap[f"{appointment.status}"],
-                "estimated_wait_minutes": estimated_minutes
+                "estimated_wait_minutes": estimated_minutes,
+                "is_delayed": is_delayed
             }), 200
 
     finally:

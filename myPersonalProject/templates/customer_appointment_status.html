@@ -285,16 +285,16 @@
             }
 
             // Normale Anzeige – wartend
-            const waitDisplay = (data.estimated_wait_minutes !== null && data.estimated_wait_minutes !== undefined)
-                ? `~${data.estimated_wait_minutes} Min`
-                : "–";
+            const waitDisplay = (data.estimated_wait_minutes !== null && data.estimated_wait_minutes !== undefined && !data.is_delayed)
+            ? `~${data.estimated_wait_minutes} Min`
+            : (data.is_delayed ? "Bitte haben Sie etwas Geduld – der vorherige Termin dauert etwas länger." : "–");
 
             document.getElementById("status-container").innerHTML = `
 
                 <div class="info-grid">
                     <div class="info-box">
                         <div class="info-label">Wartezeit</div>
-                        <div class="info-value accent">${waitDisplay}</div>
+                        <div class="info-value accent" style="${data.is_delayed ? 'font-size:18px;' : ''}">${waitDisplay}</div>
                     </div>
                     <div class="info-box">
                         <div class="info-label">Status</div>
