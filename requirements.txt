@@ -5,3 +5,4 @@ flask-socketio
 sqlalchemy
 python-dotenv
 twilio
+gunicorn
