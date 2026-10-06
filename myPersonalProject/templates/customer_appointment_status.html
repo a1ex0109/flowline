@@ -285,9 +285,11 @@
             }
 
             // Normale Anzeige – wartend
-            const waitDisplay = (data.estimated_wait_minutes !== null && data.estimated_wait_minutes !== undefined && !data.is_delayed)
-            ? `~${data.estimated_wait_minutes} Min`
-            : (data.is_delayed ? "Bitte haben Sie etwas Geduld – der vorherige Termin dauert etwas länger." : "–");
+            let waitDisplay = (data.estimated_wait_minutes !== null && data.estimated_wait_minutes !== undefined && !data.is_delayed)
+                ? `~${data.estimated_wait_minutes} Min`
+                : (data.current_overrun_minutes ?
+                `Der aktuelle Termin dauert ca. ${data.current_overrun_minutes} Min. länger als geplant. Vielen Dank für Ihre Geduld!`
+                : `Der aktuelle Termin dauert länger als geplant. Vielen Dank für Ihre Geduld!`);
 
             document.getElementById("status-container").innerHTML = `
 

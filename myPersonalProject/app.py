@@ -3363,6 +3363,7 @@ def customer_queue_status_data(token, queue_id):
     }
 
     session_db = Session()
+    now = datetime.datetime.now(datetime.timezone.utc).astimezone().replace(second=0, microsecond=0)
     try:
         settings = session_db.query(ProviderSettings).filter_by(
             queue_token=token
@@ -3389,6 +3390,12 @@ def customer_queue_status_data(token, queue_id):
         active_events = [e for e in event if e["status"] == "in_progress"]
         current_event = next((e for e in event if e["type"] == "Walk-in" and e["id"] == queue_id), None)
 
+        current_overrun_minutes = None
+        if active_events:
+            scheduled_end = active_events[0]["end"]
+            overrun_seconds = (now - scheduled_end).total_seconds()
+            if overrun_seconds > 0:
+                current_overrun_minutes = round(overrun_seconds / 60)
 
         for item in event:
             if item["type"] == "Walk-in":
@@ -3410,7 +3417,6 @@ def customer_queue_status_data(token, queue_id):
         if entry.start:
             effective_start =  current_event["effective_start"]
             effective_end =  current_event["effective_end"]
-            now = datetime.datetime.now(datetime.timezone.utc).astimezone().replace(second=0, microsecond=0)
             diff_seconds = (effective_start - now).total_seconds()
             estimated_minutes = max(round(int(diff_seconds) / 60), 0)
 
@@ -3442,7 +3448,8 @@ def customer_queue_status_data(token, queue_id):
                 "status": statusMap[f"{entry.status}"],
                 "position": entry.position,
                 "estimated_wait_minutes": estimated_minutes,
-                "is_delayed": is_delayed
+                "is_delayed": is_delayed,
+                "current_overrun_minutes": current_overrun_minutes
             }), 200
 
         else:
@@ -3451,7 +3458,8 @@ def customer_queue_status_data(token, queue_id):
                 "status": statusMap[f"{entry.status}"],
                 "position": entry.position_with_appointments,
                 "estimated_wait_minutes": estimated_minutes,
-                "is_delayed": is_delayed
+                "is_delayed": is_delayed,
+                "current_overrun_minutes": current_overrun_minutes
             }), 200
 
     except Exception as e:
@@ -3506,8 +3514,25 @@ def customer_appointment_status_data(token):
         if appointment.status == "no_show":
             return jsonify({"status": statusMap["no_show"]}), 200
 
+        provider_id = appointment.provider_id
+
+        appointments = load_appointments_for_timeline(provider_id)
+        queue = load_queue_for_timeline(provider_id)
+        events = build_timeline(appointments, queue)
+
+        active_list = [e for e in events if e["status"] not in ("completed", "no_show")]
+        active_events = [e for e in active_list if e["status"] == "in_progress"]
+        now = datetime.datetime.now(datetime.timezone.utc).astimezone().replace(second=0, microsecond=0)
+
         estimated_minutes = None
         is_delayed = False
+
+        current_overrun_minutes = None
+        if active_events:
+            scheduled_end = active_events[0]["end"]
+            overrun_seconds = (now - scheduled_end).total_seconds()
+            if overrun_seconds > 0:
+                current_overrun_minutes = round(overrun_seconds / 60)
 
         if appointment.start:
             start_aware = appointment.start.astimezone()
@@ -3543,7 +3568,8 @@ def customer_appointment_status_data(token):
                 "name": appointment.customer_name,
                 "status": statusMap[f"{appointment.status}"],
                 "estimated_wait_minutes": estimated_minutes,
-                "is_delayed": is_delayed
+                "is_delayed": is_delayed,
+                "current_overrun_minutes": current_overrun_minutes
             }), 200
 
         else:
@@ -3551,7 +3577,8 @@ def customer_appointment_status_data(token):
                 "name": appointment.customer_name,
                 "status": statusMap[f"{appointment.status}"],
                 "estimated_wait_minutes": estimated_minutes,
-                "is_delayed": is_delayed
+                "is_delayed": is_delayed,
+                "current_overrun_minutes": current_overrun_minutes
             }), 200
 
     finally:
@@ -3597,8 +3624,9 @@ def upgrade():
 reminder_thread = threading.Thread(target=reminder_worker, daemon=True)
 reminder_thread.start()
 
-#socketio.run(app, use_reloader=True, debug=True, allow_unsafe_werkzeug=True, port=6060)
 
-if __name__ == '__main__':
-    port = int(os.environ.get("PORT", 5000))
-    socketio.run(app, host="0.0.0.0", port=port, debug=True)
+socketio.run(app, use_reloader=True, debug=True, allow_unsafe_werkzeug=True, port=6060)
+
+#if __name__ == '__main__': # Maybe geht Render nicht weil allow_unsafe_werkzeug=True nicht da ist
+    #port = int(os.environ.get("PORT", 5000))
+    #socketio.run(app, host="0.0.0.0", port=port, debug=True)
