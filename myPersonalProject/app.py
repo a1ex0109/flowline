@@ -640,7 +640,6 @@ def dashboard():
     ).all()
 
     session_db.close()
-    print(session.get("room_id"), "room_id")
     return render_template("dashboard.html", room_id=session.get("room_id"), services=services)
 
 @app.route("/dashboard/appointments", methods=["POST", "GET"])
@@ -1059,6 +1058,13 @@ def delete_appointment(appointment_id):
     finally:
         session_db.close()
 
+def get_services_by_ids(service_ids):
+    session_db = Session()
+    services = session_db.query(ProviderService).filter(
+        ProviderService.id.in_(service_ids)
+    ).all()
+
+    return services
 
 @app.route("/dashboard/appointments/today", methods=["GET"])
 @login_required
@@ -1085,9 +1091,7 @@ def appointments_today():
         except:
             service_ids = []
 
-        services = session_db.query(ProviderService).filter(
-            ProviderService.id.in_(service_ids)
-        ).all()
+        services = get_services_by_ids(service_ids)
 
         service_names = " + ".join([s.name for s in services]) if services else None
 
@@ -1120,7 +1124,7 @@ def appointments_today():
 @app.route("/dashboard/appointments/next", methods=["GET"])
 @login_required
 def next_appointment():
-    now = datetime.datetime.now(datetime.timezone.utc).astimezone().replace(second=0, microsecond=0)
+    #now = datetime.datetime.now(datetime.timezone.utc).astimezone().replace(second=0, microsecond=0)
 
     session_db = Session()
 
@@ -1139,10 +1143,7 @@ def next_appointment():
         except:
             service_ids = []
 
-        # Alle Services laden
-        services = session_db.query(ProviderService).filter(
-            ProviderService.id.in_(service_ids)
-        ).all()
+        services = get_services_by_ids(service_ids)
 
         service_names = " + ".join([s.name for s in services]) if services else None
 
@@ -1179,9 +1180,7 @@ def next_appointment():
         except:
             service_ids = []
 
-        services = session_db.query(ProviderService).filter(
-            ProviderService.id.in_(service_ids)
-        ).all()
+        services = get_services_by_ids(service_ids)
 
         service_names = " + ".join([s.name for s in services]) if services else None
 
@@ -1217,7 +1216,7 @@ def next_appointment():
 @app.route("/dashboard/appointments/current", methods=["GET"])
 @login_required
 def current_appointment():
-    now = datetime.datetime.now(datetime.timezone.utc).astimezone().replace(second=0, microsecond=0)
+    #now = datetime.datetime.now(datetime.timezone.utc).astimezone().replace(second=0, microsecond=0)
 
     session_db = Session()
 
@@ -1243,9 +1242,7 @@ def current_appointment():
         except:
             service_ids = []
 
-        services = session_db.query(ProviderService).filter(
-            ProviderService.id.in_(service_ids)
-        ).all()
+        services = get_services_by_ids(service_ids)
 
         service_names = " + ".join([s.name for s in services]) if services else None
 
@@ -1278,9 +1275,7 @@ def current_appointment():
         except:
             service_ids = []
 
-        services = session_db.query(ProviderService).filter(
-            ProviderService.id.in_(service_ids)
-        ).all()
+        services = get_services_by_ids(service_ids)
 
         service_names = " + ".join([s.name for s in services]) if services else None
 
@@ -1530,9 +1525,7 @@ def load_queue():
         #updates = []
 
         for q in queues:
-            service = session_db.query(ProviderService).filter(
-                ProviderService.id.in_(json.loads(q.services_json))
-            ).all()
+            service = get_services_by_ids(json.loads(q.services_json))
 
             service_names = " + ".join([s.name for s in service]) if service else ""
 
@@ -2860,6 +2853,9 @@ def send_reminder_email(appointment, timing):
 
     service_names = " + ".join([s.name for s in services]) if services else None
     duration = sum([s.duration_minutes for s in services])
+
+    if not duration:
+        duration = appointment.custom_duration
 
     if appointment.custom_duration:
         if service_names:

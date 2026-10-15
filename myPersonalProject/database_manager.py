@@ -20,12 +20,12 @@ class Provider(Base):
     city = Column(String(120))
     created_at = Column(DateTime, default=datetime.utcnow)
 
-    credentials = relationship("ProviderCredentials", back_populates="provider")
+    credentials = relationship("ProviderCredentials", back_populates="provider", uselist=False)
     services = relationship("ProviderService", back_populates="provider")
     appointments = relationship("Appointment", back_populates="provider")
     queue_entries = relationship("QueueEntry", back_populates="provider")
-    settings = relationship("ProviderSettings", back_populates="provider")
-    subscription = relationship("ProviderSubscription", back_populates="provider")
+    settings = relationship("ProviderSettings", back_populates="provider", uselist=False)
+    subscription = relationship("ProviderSubscription", back_populates="provider", uselist=False)
     staff = relationship("ProviderStaff", back_populates="provider")
 
 class ProviderCredentials(Base):
@@ -37,7 +37,7 @@ class ProviderCredentials(Base):
     password_hash = Column(String(255), nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
-    provider = relationship("Provider", back_populates="credentials")
+    provider = relationship("Provider", back_populates="credentials", uselist=False)
 
 class ProviderService(Base):
     __tablename__ = "provider_services"
@@ -47,7 +47,7 @@ class ProviderService(Base):
     name = Column(String(100), nullable=False)
     duration_minutes = Column(Integer, nullable=False)
 
-    provider = relationship("Provider", back_populates="services")
+    provider = relationship("Provider", back_populates="services", uselist=False)
 
 class ProviderStaff(Base):
     __tablename__ = "staff"
@@ -57,7 +57,7 @@ class ProviderStaff(Base):
     name = Column(String(200), nullable=False)
     is_owner = Column(Boolean, default=False)
 
-    provider = relationship("Provider", back_populates="staff")
+    provider = relationship("Provider", back_populates="staff", uselist=False)
     appointments = relationship("Appointment", back_populates="staff_member")
     queue_entries = relationship("QueueEntry", back_populates="staff_member")
 
@@ -83,7 +83,7 @@ class Appointment(Base):
     reminded_3h = Column(Boolean, default=False)
     appointment_token = Column(String, unique=True, nullable=False)
 
-    provider = relationship("Provider", back_populates="appointments")
+    provider = relationship("Provider", back_populates="appointments", uselist=False)
     staff_member = relationship("ProviderStaff", back_populates="appointments")
 
 class QueueEntry(Base):
@@ -107,7 +107,7 @@ class QueueEntry(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     status = Column(String(50), default="pending")
 
-    provider = relationship("Provider", back_populates="queue_entries")
+    provider = relationship("Provider", back_populates="queue_entries", uselist=False)
     staff_member = relationship("ProviderStaff", back_populates="queue_entries")
 
 
@@ -115,7 +115,7 @@ class ProviderSettings(Base):
     __tablename__ = "provider_settings"
 
     id = Column(Integer, primary_key=True)
-    provider_id = Column(Integer, ForeignKey("providers.id"), nullable=False)
+    provider_id = Column(Integer, ForeignKey("providers.id"), unique=True, nullable=False)
 
     reminder_24h = Column(Boolean, default=True)
     reminder_3h = Column(Boolean, default=True)
@@ -140,14 +140,14 @@ class ProviderSettings(Base):
 
     queue_token = Column(String(64), unique=True, nullable=True)
 
-    provider = relationship("Provider", back_populates="settings")
+    provider = relationship("Provider", back_populates="settings", uselist=False)
 
 
 class ProviderSubscription(Base):
     __tablename__ = "provider_subscriptions"
 
     id = Column(Integer, primary_key=True)
-    provider_id = Column(Integer, ForeignKey("providers.id"), nullable=False)
+    provider_id = Column(Integer, ForeignKey("providers.id"), unique=True, nullable=False)
 
     plan = Column(String(50), nullable=False, default="free")  # free, basic, pro, premium
     start_date = Column(DateTime, nullable=True, default=datetime.utcnow)
@@ -156,7 +156,7 @@ class ProviderSubscription(Base):
     is_active = Column(Boolean, default=True)
     auto_renew = Column(Boolean, default=True)
 
-    provider = relationship("Provider", back_populates="subscription")
+    provider = relationship("Provider", back_populates="subscription", uselist=False)
 
 
 
