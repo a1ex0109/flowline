@@ -1,14 +1,11 @@
 import smtplib
-from datetime import timedelta, timezone
 from email.message import EmailMessage
 from flask import Flask, render_template, redirect, url_for, request, session, send_file, jsonify
 from flask_bcrypt import Bcrypt
 from flask_login import LoginManager, login_user, logout_user, login_required, current_user, UserMixin
 from flask_socketio import SocketIO, emit, join_room
 import datetime
-import time
 import random
-import uuid
 from sqlalchemy import func
 from sqlalchemy.orm import joinedload
 from dotenv import load_dotenv
@@ -63,14 +60,16 @@ def index():
 
 @app.route("/provider-login-page", methods=["GET"])
 def provider_login_page():
-    session["room_id"] = f"login_{secrets.token_urlsafe(16)}"
-    return render_template("provider-login.html", room_id=session.get("room_id"))
+    return render_template("provider-login.html")
 
 @app.route("/provider-login", methods=["POST", "GET"])
 def provider_login():
     email = request.form.get("email")
     password = request.form.get("password")
     remember_me = request.form.get("remember_me") == "true"
+
+    tab_id = request.form.get("tab_id")
+    session["room_id"] = f"login_{tab_id}" if tab_id else None
 
     if not email and not password:
         emit_to_user("error", {
@@ -104,8 +103,7 @@ def provider_login():
 
 @app.route("/register/provider", methods=["GET"])
 def provider_register():
-    session["room_id"] = f"register_{secrets.token_urlsafe(16)}"
-    return render_template("provider-register.html", room_id=session.get("room_id"))
+    return render_template("provider-register.html")
 
 @app.route("/register/provider/submit", methods=["POST", "GET"])
 def provider_register_submit():
@@ -119,6 +117,8 @@ def provider_register_submit():
     password = request.form.get("password")
     confirm_password = request.form.get("password_repeat")
 
+    tab_id = request.form.get("tab_id")
+    session["room_id"] = f"register_{tab_id}" if tab_id else None
 
     reg_token = secrets.token_urlsafe(16)
     registration_data[reg_token] = {
@@ -417,12 +417,12 @@ def onboarding_staff():
 
 @app.route("/password-reset", methods=["POST", "GET"])
 def password_reset():
-    session["room_id"] = f"reset_{secrets.token_urlsafe(16)}"
-
-    return render_template("password-reset.html", room_id=session.get("room_id"))
+    return render_template("password-reset.html")
 
 @app.route("/password-reset/enter-code", methods=["POST", "GET"])
 def password_reset_verify_code():
+    tab_id = request.form.get("tab_id")
+    session["room_id"] = f"reset_{tab_id}" if tab_id else None
 
     return render_template("verify-code.html", submit_url="/password-reset/check-password", resend_url="/password-reset/verify", room_id=session.get("room_id"))
 
@@ -565,14 +565,14 @@ def passwort_reset_check():
 
 @app.route("/password-update", methods=["POST", "GET"])
 def password_update():
-    session["room_id"] = f"pw_update_{secrets.token_urlsafe(16)}"
-
-    return render_template("password-update.html", room_id=session.get("room_id"))
+    return render_template("password-update.html")
 
 @app.route("/password-update/confirm", methods=["POST", "GET"])
 def password_update_confirm():
     password = request.form.get("password")
     password_repeat = request.form.get("password_repeat")
+    tab_id = request.form.get("tab_id")
+    session["room_id"] = f"pw_update_{tab_id}" if tab_id else None
 
     reset_token = request.form.get("reset_token")
 
@@ -1973,9 +1973,7 @@ def get_timeline():
                     session_db.commit()
 
                 service_ids = [int(s) for s in item["services"]]
-                services = session_db.query(ProviderService).filter(
-                    ProviderService.id.in_(service_ids)
-                ).all()
+                services = get_services_by_ids(service_ids)
                 service_names = " + ".join([s.name for s in services]) if services else None
 
                 if item["custom_duration"]:
@@ -2015,9 +2013,7 @@ def get_timeline():
 
             else:
                 service_ids = [int(s) for s in item["services"]]
-                services = session_db.query(ProviderService).filter(
-                    ProviderService.id.in_(service_ids)
-                ).all()
+                services = get_services_by_ids(service_ids)
                 service_names = " + ".join([s.name for s in services]) if services else None
 
                 if item["custom_duration"]:
@@ -2142,24 +2138,22 @@ def get_provider_profile():
 
     session_db = Session()
     try:
-        provider = session_db.query(Provider).filter_by(id=current_user.id).first()
-
-        credentials = session_db.query(ProviderCredentials).filter_by(
-            provider_id=current_user.id
-        ).first()
-
-        services = session_db.query(ProviderService).filter_by(
-            provider_id=current_user.id
-        ).all()
+        provider = session_db.query(Provider).options(
+            joinedload(Provider.credentials),
+            joinedload(Provider.services),
+            joinedload(Provider.settings)
+        ).filter_by(id=current_user.id).first()
 
         staff = session_db.query(ProviderStaff).filter(
             ProviderStaff.provider_id == current_user.id,
             ProviderStaff.is_owner == False,
         ).all()
 
-        settings = session_db.query(ProviderSettings).filter_by(
-            provider_id=current_user.id
-        ).first()
+        credentials = provider.credentials if provider else None
+
+        services = provider.services if provider else None
+
+        settings = provider.settings if provider else None
 
         data = {
             "business_name": provider.business_name,
@@ -2761,7 +2755,8 @@ def reminder_worker():
                 for k in expired:
                     data.pop(k, None)
 
-            appointments = session_db.query(Appointment).filter(
+            appointments = session_db.query(Appointment).options(
+                joinedload(Appointment.provider)).filter(
                 Appointment.customer_email != None,
                 Appointment.customer_email != "",
                 Appointment.status.in_(["pending", "confirmed"])
@@ -2840,17 +2835,12 @@ def send_reminder_email(appointment, timing):
 
     tracking_link = f"http://127.0.0.1:6060/appointment/{appointment.appointment_token}/status"
 
-    session_db = Session()
-
     try:
         service_ids = json.loads(appointment.services_json)
     except:
         service_ids = []
 
-    services = session_db.query(ProviderService).filter(
-        ProviderService.id.in_(service_ids)
-    ).all()
-
+    services = get_services_by_ids(service_ids)
     service_names = " + ".join([s.name for s in services]) if services else None
     duration = sum([s.duration_minutes for s in services])
 
@@ -3179,10 +3169,12 @@ def qr_image():
 
 @app.route("/queue/<string:token>") # Room muss anders sein! Weil sonst sieht man Errors im Dashboard
 def customer_queue(token):
-
     session_db = Session()
     try:
-        settings = session_db.query(ProviderSettings).filter_by(
+        # 1. Settings laden und den Provider direkt per joinedload mitbringen!
+        settings = session_db.query(ProviderSettings).options(
+            joinedload(ProviderSettings.provider)
+        ).filter_by(
             queue_token=token
         ).first()
 
@@ -3192,14 +3184,15 @@ def customer_queue(token):
         if not settings.queue_enabled:
             return render_template("queue_closed.html")
 
-        provider = session_db.query(Provider).filter_by(
-            id=settings.provider_id
-        ).first()
+        # Der Provider ist jetzt direkt über settings.provider da (kein extra Query nötig!)
+        provider = settings.provider
 
-        service = session_db.query(ProviderService).filter_by(
+        # 2. Services laden (bleibt separat, da es eine Liste/Collection ist)
+        services = session_db.query(ProviderService).filter_by(
             provider_id=settings.provider_id
         ).all()
 
+        # 3. Aktive Einträge zählen
         active_count = session_db.query(QueueEntry).filter_by(
             provider_id=settings.provider_id
         ).filter(
@@ -3209,11 +3202,11 @@ def customer_queue(token):
         is_full = active_count >= settings.queue_max_length
 
         return render_template("customer_queue_join.html",
-            provider=provider,
-            service=service,
-            token=token,
-            is_full=is_full
-       )
+                               provider=provider,
+                               service=services,
+                               token=token,
+                               is_full=is_full
+                               )
 
     finally:
         session_db.close()
@@ -3240,7 +3233,7 @@ def customer_join_queue(token):
             return jsonify({"error": "Kein Service ausgewählt."}), 400
 
         count = session_db.query(QueueEntry).filter_by(
-            provider_id=current_user.id,
+            provider_id=settings.provider_id,
         ).count()
 
         if not customer_name:
@@ -3317,7 +3310,9 @@ def customer_join_queue(token):
 def customer_queue_status(token, queue_id):
     session_db = Session()
     try:
-        settings = session_db.query(ProviderSettings).filter_by(
+        settings = session_db.query(ProviderSettings).options(
+            joinedload(ProviderSettings.provider)
+        ).filter_by(
             queue_token=token
         ).first()
 
@@ -3332,9 +3327,7 @@ def customer_queue_status(token, queue_id):
         if not entry:
             return render_template("queue_invalid.html"), 404
 
-        provider = session_db.query(Provider).filter_by(
-            id=settings.provider_id
-        ).first()
+        provider = settings.provider
 
         return render_template("customer_queue_status.html",
                provider=provider,
@@ -3373,6 +3366,9 @@ def customer_queue_status_data(token, queue_id):
             provider_id=settings.provider_id
         ).first()
 
+        if not entry:
+            return jsonify({"error": "Nicht gefunden"}), 404
+
         appointments = load_appointments_for_timeline(settings.provider_id)
         queue = load_queue_for_timeline(settings.provider_id)
         events = build_timeline(
@@ -3398,9 +3394,6 @@ def customer_queue_status_data(token, queue_id):
                 if item["id"] == queue_id:
                     entry.position_with_appointments = event.index(item) + 1
 
-        if not entry:
-            return jsonify({"error": "Nicht gefunden"}), 404
-
         if entry.status == "completed":
             return jsonify({"status": statusMap["completed"]}), 200
 
@@ -3416,7 +3409,7 @@ def customer_queue_status_data(token, queue_id):
             diff_seconds = (effective_start - now).total_seconds()
             estimated_minutes = max(round(int(diff_seconds) / 60), 0)
 
-            is_delayed = True if estimated_minutes == 0 else False
+            is_delayed = True if current_overrun_minutes else False
 
             if effective_end < now:
                 session_db.query(QueueEntry).filter_by(
@@ -3438,30 +3431,20 @@ def customer_queue_status_data(token, queue_id):
 
                 entry.status = "in_progress"
 
-        if not appointments:
-            return jsonify({
-                "name": entry.customer_name,
-                "status": statusMap[f"{entry.status}"],
-                "position": entry.position,
-                "estimated_wait_minutes": estimated_minutes,
-                "is_delayed": is_delayed,
-                "current_overrun_minutes": current_overrun_minutes
-            }), 200
-
-        else:
-            return jsonify({
-                "name": entry.customer_name,
-                "status": statusMap[f"{entry.status}"],
-                "position": entry.position_with_appointments,
-                "estimated_wait_minutes": estimated_minutes,
-                "is_delayed": is_delayed,
-                "current_overrun_minutes": current_overrun_minutes
-            }), 200
+        return jsonify({
+            "name": entry.customer_name,
+            "status": statusMap[f"{entry.status}"],
+            "position": entry.position,
+            "estimated_wait_minutes": estimated_minutes,
+            "is_delayed": is_delayed,
+            "current_overrun_minutes": current_overrun_minutes
+        }), 200
 
     except Exception as e:
         session_db.rollback()
         print("ERROR:", e)
         return jsonify({"error": "Interner Serverfehler."}), 500
+
     finally:
         session_db.close()
 
@@ -3537,7 +3520,7 @@ def customer_appointment_status_data(token):
             diff_seconds = (start_aware - now).total_seconds()
             estimated_minutes = max(round(int(diff_seconds) / 60), 0)
 
-            is_delayed = True if estimated_minutes == 0 else False
+            is_delayed = True if current_overrun_minutes else False
 
             if end_aware < now:
                 session_db.query(Appointment).filter_by(
@@ -3559,23 +3542,13 @@ def customer_appointment_status_data(token):
 
                 appointment.status = "in_progress"
 
-        if not appointments:
-            return jsonify({
-                "name": appointment.customer_name,
-                "status": statusMap[f"{appointment.status}"],
-                "estimated_wait_minutes": estimated_minutes,
-                "is_delayed": is_delayed,
-                "current_overrun_minutes": current_overrun_minutes
-            }), 200
-
-        else:
-            return jsonify({
-                "name": appointment.customer_name,
-                "status": statusMap[f"{appointment.status}"],
-                "estimated_wait_minutes": estimated_minutes,
-                "is_delayed": is_delayed,
-                "current_overrun_minutes": current_overrun_minutes
-            }), 200
+        return jsonify({
+            "name": appointment.customer_name,
+            "status": statusMap[f"{appointment.status}"],
+            "estimated_wait_minutes": estimated_minutes,
+            "is_delayed": is_delayed,
+            "current_overrun_minutes": current_overrun_minutes
+        }), 200
 
     finally:
         session_db.close()

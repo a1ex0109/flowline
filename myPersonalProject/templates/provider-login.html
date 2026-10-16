@@ -71,11 +71,12 @@
 </body>
 <script>
   let popupTimeout = null;
-
+  const tabId = crypto.randomUUID();
+  const tabRoom = "login_" + tabId;
   var socket = io();
 
   socket.on("connect", () => {
-     socket.emit("join_room", { room: "{{ room_id }}" });
+     socket.emit("join_room", { room: tabRoom });
   });
 
   socket.on("error", (data) => {
@@ -100,6 +101,7 @@
     formData.append("email", email.value);
     formData.append("password", password.value);
     formData.append("remember_me", remember_me.checked);
+    formData.append("tab_id", tabId);
 
     const res = await fetch(actionUrl, {
       method: "POST",

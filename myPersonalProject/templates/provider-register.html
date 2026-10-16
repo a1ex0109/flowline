@@ -96,11 +96,12 @@
 </body>
 <script>
 let popupTimeout = null;
-
+const tabId = crypto.randomUUID();
+const tabRoom = "register_" + tabId;
 var socket = io();
 
 socket.on("connect", () => {
-   socket.emit("join_room", { room: "{{ room_id }}" });
+   socket.emit("join_room", { room: tabRoom });
 });
 
   socket.on("error", (data) => {
@@ -126,6 +127,7 @@ async function submitForm(actionUrl) {
   const city = document.getElementById("city");
   const password = document.getElementById("password");
   const password_repeat = document.getElementById("password_repeat");
+
   const formData = new FormData();
 
   formData.append("owner_name", owner_name.value)
@@ -137,6 +139,7 @@ async function submitForm(actionUrl) {
   formData.append("city", city.value);
   formData.append("password", password.value);
   formData.append("password_repeat", password_repeat.value);
+  formData.append("tab_id", tabId);
 
   const res = await fetch(actionUrl, {
     method: "POST",
