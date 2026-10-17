@@ -1852,7 +1852,7 @@ def find_free_slot(start_time, duration, appointments, timeline):
 
 @app.route("/timeline")
 def get_timeline():
-
+    print("Ausgeführt! 1855")
     session_db = Session()
     try:
         provider_id = current_user.id
@@ -3376,11 +3376,12 @@ def customer_queue_status_data(token, queue_id):
             queue
         )
 
-        #event = appointments + queue
-        #event.sort(key=lambda x: x["start"])
         event = [e for e in events if e["status"] not in ["completed", "no_show"]]
         active_events = [e for e in event if e["status"] == "in_progress"]
         current_event = next((e for e in event if e["type"] == "Walk-in" and e["id"] == queue_id), None)
+        event_ = appointments + queue
+        event_ = [e for e in event_ if e.get("status") not in ("completed", "no_show")]
+        event_.sort(key=lambda x: x["start"])
 
         current_overrun_minutes = None
         if active_events:
@@ -3389,10 +3390,10 @@ def customer_queue_status_data(token, queue_id):
             if overrun_seconds > 0:
                 current_overrun_minutes = round(overrun_seconds / 60)
 
-        for item in event:
+        for item in event_:
             if item["type"] == "Walk-in":
                 if item["id"] == queue_id:
-                    entry.position_with_appointments = event.index(item) + 1
+                    entry.position_with_appointments = event_.index(item) + 1
 
         if entry.status == "completed":
             return jsonify({"status": statusMap["completed"]}), 200
@@ -3417,8 +3418,6 @@ def customer_queue_status_data(token, queue_id):
                     provider_id=settings.provider_id
                 ).update({QueueEntry.status: "completed"})
 
-                session_db.commit()
-
                 entry.status = "completed"
 
             if effective_start <= now <= effective_end and not active_events:
@@ -3427,14 +3426,15 @@ def customer_queue_status_data(token, queue_id):
                     provider_id=settings.provider_id
                 ).update({QueueEntry.status: "in_progress"})
 
-                session_db.commit()
-
                 entry.status = "in_progress"
 
+        session_db.commit()
+
+        print(entry.position_with_appointments, "position")
         return jsonify({
             "name": entry.customer_name,
             "status": statusMap[f"{entry.status}"],
-            "position": entry.position,
+            "position_with_appointments": entry.position_with_appointments,
             "estimated_wait_minutes": estimated_minutes,
             "is_delayed": is_delayed,
             "current_overrun_minutes": current_overrun_minutes
