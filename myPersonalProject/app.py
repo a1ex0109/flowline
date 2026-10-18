@@ -3282,7 +3282,7 @@ def customer_join_queue(token):
 
         for e in events:
            if e["type"] == "Walk-in":
-               if e["status"] == "pending" or e["status"] == "in_progress":
+               if e["status"] == "pending":
                    entry = session_db.query(QueueEntry).filter_by(
                         id=e["id"],
                         provider_id=settings.provider_id
