@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Support & Hilfe – Flowline</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}" />
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="min-h-screen flex flex-col bg-gray-50">
+
+  <div class="flex-1 flex flex-col items-center justify-center p-4">
+    <div class="w-full max-w-md bg-white p-8 rounded-xl shadow-lg border border-gray-200 text-center">
+
+      <h1 class="text-2xl font-bold text-gray-900 mb-2">
+        Flowline Support
+      </h1>
+      <p class="text-sm text-gray-600 mb-6">
+        Du hast Probleme beim Login, deine E-Mail vergessen oder brauchst direkte Hilfe? Kontaktiere uns jederzeit.
+      </p>
+
+      <div class="space-y-4 text-left bg-gray-50 p-4 rounded-lg border border-gray-100 mb-6">
+        <div>
+          <span class="block text-xs font-semibold text-gray-400 uppercase tracking-wider">E-Mail-Adresse</span>
+          <a href="mailto:shmidtalex0109@gmail.com" class="text-sm font-medium text-emerald-700 hover:underline">
+            shmidtalex0109@gmail.com
+          </a>
+        </div>
+
+        <div>
+          <span class="block text-xs font-semibold text-gray-400 uppercase tracking-wider">Telefonnummer</span>
+          <a href="tel:+4915752444041" class="text-sm font-medium text-gray-800 hover:underline">
+            +49 157 52444041
+          </a>
+        </div>
+      </div>
+
+      <!-- HIER: Nutzt jetzt genau dein .btn-primary CSS -->
+      <a href="javascript:history.back()" class="btn-primary block text-center no-underline">
+        Zurück zum Login
+      </a>
+    </div>
+  </div>
+
+  <div class="text-center text-xs text-gray-400 mt-auto mb-4">
+      <div class="mb-1">
+          <a href="#" class="underline text-gray-500">Nutzungsbedingungen</a>
+          <span class="mx-2">|</span>
+          <a href="#" class="underline text-gray-500">Datenschutz</a>
+      </div>
+      <div>© 2026 <a href="#" class="underline text-gray-500">Flowline</a>. Alle Rechte vorbehalten.</div>
+  </div>
+</body>
+</html>

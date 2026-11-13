@@ -19,7 +19,8 @@
     /* ── FullCalendar overrides ── */
     .fc { height: 100%; }
 
-    .fc .fc-button {
+    .fc .fc-button,
+    .fc-staff-select-dropdown {
       background: #fff;
       color: #2e7d32;
       border: 1px solid #c8e6c9;
@@ -30,7 +31,8 @@
       box-shadow: none;
       transition: all 0.15s ease;
     }
-    .fc .fc-button:hover {
+    .fc .fc-button:hover,
+    .fc-staff-select-dropdown:hover {
       background: #f1f8f2;
       border-color: #81c784;
       color: #1b5e20;
@@ -72,13 +74,15 @@
     .fc-daygrid-day.fc-day-today,
     .fc-timegrid-col.fc-day-today { background: #f0fdf4 !important; }
 
+    .fc-staffDropdown-button {
+      display: none !important;
+    }
     /* ── Base card ── */
     .card {
       background: #fff;
       border-radius: 16px;
       border: 1px solid #e5e7eb;
     }
-
     /* ── Stat cards ── */
     .stat-card {
       background: #fff;
@@ -105,7 +109,6 @@
       color: #9ca3af;
       margin-top: 4px;
     }
-
     /* ── Aktuell dran ── */
     .current-card {
       background: #fff;
@@ -171,7 +174,6 @@
       gap: 8px;
     }
     .btn-primary:hover { background: #388e3c; }
-
     .btn-noshow {
       width: 100%;
       padding: 12px 20px;
@@ -187,7 +189,6 @@
       display: none;
     }
     .btn-noshow:hover { background: #fef2f2; }
-
     .btn-add {
       padding: 10px 18px;
       border-radius: 10px;
@@ -199,7 +200,6 @@
       cursor: pointer;
     }
     .btn-add:hover { background: #388e3c; }
-
     .btn-secondary {
       padding: 10px 20px;
       border-radius: 10px;
@@ -211,7 +211,6 @@
       cursor: pointer;
     }
     .btn-secondary:hover { background: #f9fafb; }
-
     .btn-delete {
       display: none;
       padding: 10px 20px;
@@ -223,9 +222,7 @@
       border: none;
       cursor: pointer;
     }
-
     .btn-delete:hover { background-color: #B91C1C; }
-
     /* ── Nächste Termine ── */
     .next-card {
       background: #fff;
@@ -276,7 +273,6 @@
       border-radius: 99px;
       white-space: nowrap;
     }
-
     /* ── Queue ── */
     .queue-section-label {
       font-size: 13px;
@@ -369,14 +365,12 @@
       display: flex;
       flex-direction: column;
     }
-
     .form-group {
       display: flex;
       flex-direction: column;
       gap: 6px;
       margin-bottom: 16px;
     }
-
     .form-group label { font-size: 14px; font-weight: 500; color: #555; }
     .form-group input,
     .form-group select,
@@ -395,7 +389,6 @@
       box-shadow: 0 0 0 3px rgba(67,160,71,0.2);
       outline: none;
     }
-
     /* ── Popup ── */
     .popup {
       position: fixed;
@@ -410,7 +403,6 @@
       z-index: 100;
     }
     .popup.show { transform: translateX(0); }
-
     .message {
       background: #e6ffe6;
       color: #006600;
@@ -429,7 +421,6 @@
       font-size: 15px;
       font-weight: 500;
     }
-
     #sidebar a {
       display: flex;
       align-items: center;
@@ -502,7 +493,6 @@
     }
   </style>
 </head>
-
 <body>
 <div class="flex items-center gap-4">
   <div class="text-[28px] cursor-pointer px-3 py-1 bg-black/5 text-green-600 fixed top-[10px] left-[10px]
@@ -512,7 +502,7 @@
 
 <div id="sidebar" class="fixed top-0 left-[-250px] w-[250px] h-full bg-white pt-[100px] transition-[left] duration-300 ease-in-out z-[1000] border-r border-gray-200">
     <a href="/dashboard/settings"><i class="fa-solid fa-gear"></i> Einstellungen</a>
-    <a href="/support"><i class="fa-solid fa-question"></i> Hilfe</a>
+    <a href="/support"><i class="fa-solid fa-question"></i> Hilfe & Support</a>
     <a href="/buy_subscription"><i class="fa-solid fa-cart-shopping"></i> Abonnement kaufen</a>
 </div>
 
@@ -585,6 +575,10 @@
             </p>
           {% endif %}
         </div>
+        <div class="form-group" id="appointmentStaffGroup">
+          <label for="appointment_staff">Mitarbeiter</label>
+          <select id="appointment_staff" name="staff_id"></select>
+        </div>
         <div class="form-group">
           <label for="appointment_notes">Notiz (optional)</label>
           <textarea id="appointment_notes" name="appointment_notes" placeholder="z.B. kommt mit Sohn" rows="2"></textarea>
@@ -643,6 +637,10 @@
                 <a href="/dashboard/settings#services">Jetzt anlegen</a>
             </p>
           {% endif %}
+        </div>
+        <div class="form-group" id="queueStaffGroup">
+          <label for="queue_staff">Mitarbeiter</label>
+          <select id="queue_staff" name="staff_id"></select>
         </div>
         <div class="flex justify-center gap-5">
           <button type="button" class="btn-secondary" onclick="closeAddToQueueModal()">Abbrechen</button>
@@ -755,6 +753,8 @@
             <a href="#" class="underline text-gray-500">Nutzungsbedingungen</a>
             <span class="mx-2">|</span>
             <a href="#" class="underline text-gray-500">Datenschutz</a>
+            <span class="mx-2">|</span>
+            <a href="/support" class="underline text-gray-500">Hilfe & Support</a>
        </div>
        <div>© 2026 <a href="#" class="underline text-gray-500">Flowline</a>. Alle Rechte vorbehalten.</div>
   </div>
@@ -777,6 +777,7 @@
   // let sidebarTimeout = null;
   let currentAppointmentId = null;
   let walkinEnabled = true;
+  let activeStaffId = null;
   const state = { calendar: null };
 
   function normalizeTime(close) {
@@ -802,6 +803,79 @@
     });
   }
 
+  function populateStaffDropdown(selectedStaffId = null, staffMembers) {
+    const appointmentSelect = document.getElementById("appointment_staff");
+    const queueSelect = document.getElementById("queue_staff");
+    if (!appointmentSelect || !queueSelect) return;
+
+    appointmentSelect.innerHTML = "";
+    queueSelect.innerHTML = "";
+
+    staffMembers.forEach(staff => {
+      const value = String(staff.id);
+      const isSelected = selectedStaffId !== null && value === String(selectedStaffId);
+
+      const appointmentOption = document.createElement("option");
+      appointmentOption.value = value;
+      appointmentOption.textContent = staff.name;
+      appointmentOption.selected = isSelected;
+      appointmentSelect.appendChild(appointmentOption);
+
+      const queueOption = appointmentOption.cloneNode(true);
+      queueOption.selected = isSelected;
+      queueSelect.appendChild(queueOption);
+    });
+
+    if (selectedStaffId !== null && staffMembers.length > 0) {
+      appointmentSelect.value = String(selectedStaffId);
+      queueSelect.value = String(selectedStaffId);
+    }
+  }
+
+  function setupStaffDropdown(calendar, staffMembers) {
+    if (document.querySelector(".fc-staff-select-dropdown")) return;
+
+    const dropdownBtn = document.querySelector(".fc-staffDropdown-button");
+
+    if (!dropdownBtn) return;
+
+    const select = document.createElement("select");
+    select.className = "fc-staff-select-dropdown";
+    select.style.padding = "4px 8px";
+    select.style.borderRadius = "4px";
+
+    const defaultOption = document.createElement("option");
+    defaultOption.value = "all";
+    defaultOption.text = "Alle Mitarbeiter";
+    select.appendChild(defaultOption);
+
+    populateStaffDropdown(null, staffMembers);
+
+    staffMembers.forEach(staff => {
+      const option = document.createElement("option");
+      option.value = staff.id;
+      option.text = staff.name; // Bei Bedarf wieder: staff.is_owner ? `${staff.name} (Admin)` : staff.name
+      select.appendChild(option);
+    });
+
+    select.addEventListener("change", (e) => {
+      const selectedStaffId = e.target.value;
+      calendar.removeAllEventSources();
+
+      if (selectedStaffId === "all") {
+        activeStaffId = null;
+        calendar.addEventSource("/timeline");
+        populateStaffDropdown(null, staffMembers);
+      } else {
+        activeStaffId = selectedStaffId;
+        calendar.addEventSource(`/timeline?staff_id=${encodeURIComponent(selectedStaffId)}`);
+        populateStaffDropdown(selectedStaffId, staffMembers);
+      }
+    });
+
+    dropdownBtn.parentNode.replaceChild(select, dropdownBtn)
+  }
+
   // ── FullCalendar ────────────────────────────────────────────
   document.addEventListener("DOMContentLoaded", async () => {
     const res = await fetch("/dashboard/settings/get_provider_profile");
@@ -816,6 +890,9 @@
 
     const weekday_close = normalizeTime(data.weekday_close);
     const saturday_close = normalizeTime(data.saturday_close);
+
+
+    const staffMembers = data.staff || [];
 
     const calendarEl = document.getElementById("calendar");
     const calendar = new FullCalendar.Calendar(calendarEl, {
@@ -833,11 +910,10 @@
       snapDuration: "00:05:00",
       hiddenDays: data.sunday_closed ? [0] : [],
 
-
       headerToolbar: {
         left: "prev next today",
         center: "title",
-        right: "dayGridMonth,timeGridWeek,timeGridDay"
+        right: `dayGridMonth,timeGridWeek,timeGridDay staffDropdown`
       },
 
       buttonText: {
@@ -854,9 +930,11 @@
           calendar.setOption("slotMinTime", data.saturday_open + ":00");
           calendar.setOption("slotMaxTime", saturday_close);
         }
+
+        setupStaffDropdown(calendar, staffMembers);
       },
 
-      events: "/timeline",
+      events: `/timeline?staff_id=${encodeURIComponent(activeStaffId)}`,
 
       eventDidMount(info) {
         const statusMap = {
@@ -976,6 +1054,7 @@
     state.calendar = calendar;
     calendar.render();
     scheduleMinuteSync();
+    setupStaffDropdown(calendar, staffMembers);
   });
 
   // ── WebSocket ────────────────────────────────────────────────
@@ -1386,6 +1465,11 @@
 
   function openAddToQueueModal() {
     if (!walkinEnabled) return;
+
+    const queueSelect = document.getElementById('queue_staff');
+    if (queueSelect && activeStaffId !== null) {
+      queueSelect.value = String(activeStaffId);
+    }
 
     document.getElementById('queue-modal').classList.remove('hidden');
     document.getElementById('queue-modal').classList.add('flex');

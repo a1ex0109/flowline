@@ -7,6 +7,7 @@ from flask_socketio import SocketIO, emit, join_room
 import datetime
 import random
 from sqlalchemy import func
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import joinedload
 from dotenv import load_dotenv
 import os
@@ -17,6 +18,7 @@ import qrcode
 from io import BytesIO
 import secrets
 import json
+import dns.resolver
 
 from database_manager import Session, Provider, ProviderCredentials, ProviderService, ProviderSettings, Appointment, QueueEntry, ProviderSubscription, ProviderStaff, User
 
@@ -53,6 +55,14 @@ def join_room_event(data):
 def emit_to_user(event, data):
     room = session.get("room_id")
     socketio.emit(event, data, room=room)
+
+def check_email_domain(email):
+    try:
+        domain = email.split('@')[1]
+        records = dns.resolver.resolve(domain, 'MX')
+        return len(records) > 0
+    except Exception:
+        return False
 
 @app.route("/", methods=["POST", "GET"])
 def index():
@@ -136,6 +146,11 @@ def provider_register_submit():
 
     session_db = Session()
     try:
+        if not check_email_domain(email):
+            emit_to_user("error", {
+                "error": f"Die E-Mail-Adresse '{email}' hat eine ungültige oder nicht existierende Domain."})
+            return jsonify({"error": f"Ungültige Domain: {email}"}), 400
+
         if password != confirm_password:
             emit_to_user("error", {
                 "error": "Das Passwort und die Passwortbestätigung stimmen nicht überein."
@@ -331,6 +346,8 @@ def register_provider_code_verify():
         provider_id=new_provider.id,
         name=registration_data[reg_token]["owner_name"],
         is_owner=True,
+        email=registration_data[reg_token]["email"],
+        password_hash=password_hash
     )
 
     session_db.add(staff)
@@ -430,6 +447,11 @@ def password_reset_verify_code():
 def password_reset_verify():
     reset_email_address = request.form.get("email")
     reset_token = request.form.get("reset_token")
+
+    if not check_email_domain(reset_email_address):
+        emit_to_user("error", {
+            "error": f"Die E-Mail-Adresse '{reset_email_address}' hat eine ungültige oder nicht existierende Domain."})
+        return jsonify({"error": f"Ungültige Domain: {reset_email_address}"}), 400
 
     if not reset_token or reset_token not in password_reset_data:
         reset_token = secrets.token_urlsafe(16)
@@ -1652,13 +1674,20 @@ def calculate_avg_waiting_time():
 
 # <--- Für die Timeline --->
 
-def load_appointments_for_timeline(provider_id):
+def load_appointments_for_timeline(provider_id, staff_id):
     session_db = Session()
 
-    appointments = session_db.query(Appointment).filter(
-        Appointment.provider_id == provider_id,
-        Appointment.status != "no_show"
-    ).all()
+    if staff_id:
+        appointments = session_db.query(Appointment).filter(
+            Appointment.provider_id == provider_id,
+            Appointment.staff_id == staff_id,
+            Appointment.status != "no_show"
+        ).all()
+    else:
+        appointments = session_db.query(Appointment).filter(
+            Appointment.provider_id == provider_id,
+            Appointment.status != "no_show"
+        ).all()
 
     appointments_list = []
 
@@ -1682,12 +1711,20 @@ def load_appointments_for_timeline(provider_id):
     session_db.close()
     return appointments_list
 
-def load_queue_for_timeline(provider_id):
+def load_queue_for_timeline(provider_id, staff_id):
     session_db = Session()
 
-    queues = session_db.query(QueueEntry).filter_by(
-        provider_id=provider_id,
-    ).order_by(QueueEntry.position.asc()).all()
+    if staff_id:
+        queues = session_db.query(QueueEntry).filter(
+            QueueEntry.provider_id == provider_id,
+            QueueEntry.staff_id == staff_id,
+            QueueEntry.status != "no_show"
+        ).order_by(QueueEntry.position.asc()).all()
+    else:
+        queues = session_db.query(QueueEntry).filter(
+            QueueEntry.provider_id == provider_id,
+            QueueEntry.status != "no_show"
+        ).order_by(QueueEntry.position.asc()).all()
 
     queues_list = []
 
@@ -1721,8 +1758,8 @@ def build_timeline(appointments, queue):
     now = datetime.datetime.now(datetime.timezone.utc).astimezone().replace(second=0, microsecond=0)
 
     # 1. Termine und Walkins sortieren und Vergangene Termine filtern
-    filtered_appointments = sorted([a for a in appointments if a["status"] not in ["completed", "no_show"]], key=lambda x: x["start"])
-    filtered_queue = sorted([q for q in queue if q["status"] not in ["completed", "no_show"]], key=lambda x: x["position"])
+    filtered_appointments = sorted([a for a in appointments if a["status"] not in "completed"], key=lambda x: x["start"])
+    filtered_queue = sorted([q for q in queue if q["status"] not in "completed"], key=lambda x: x["position"])
 
     session_db = Session()
 
@@ -1852,14 +1889,21 @@ def find_free_slot(start_time, duration, appointments, timeline):
 
 @app.route("/timeline")
 def get_timeline():
-    print("Ausgeführt! 1855")
+    staff_id = request.args.get("staff_id")
+
+
+    if not staff_id or staff_id == "null" or staff_id == "None":
+        staff_id = None
+    else:
+        staff_id = int(staff_id)
+
     session_db = Session()
     try:
         provider_id = current_user.id
         now = datetime.datetime.now(datetime.timezone.utc).astimezone().replace(second=0, microsecond=0)
 
-        appointments = load_appointments_for_timeline(provider_id)
-        queue = load_queue_for_timeline(provider_id)
+        appointments = load_appointments_for_timeline(provider_id, staff_id)
+        queue = load_queue_for_timeline(provider_id, staff_id)
 
         events = build_timeline(appointments, queue)
         events.sort(key=lambda x: x["effective_start"])
@@ -2105,16 +2149,7 @@ def delete_account():
 
     session_db = Session()
     try:
-        session_db.query(Appointment).filter_by(provider_id=provider_id).delete()
-        session_db.query(QueueEntry).filter_by(provider_id=provider_id).delete()
-        session_db.query(ProviderService).filter_by(provider_id=provider_id).delete()
-        session_db.query(ProviderCredentials).filter_by(provider_id=provider_id).delete()
-        session_db.query(ProviderStaff).filter_by(id=provider_id).delete()
-        session_db.query(ProviderSettings).filter_by(id=provider_id).delete()
-        session_db.query(ProviderSubscription).filter_by(id=provider_id).delete()
-        session_db.query(Provider).filter_by(id=provider_id).delete() # <-- zuletzt
-        session_db.commit()
-
+        session_db.query(Provider).filter_by(id=provider_id).delete()
         session_db.commit()
 
         logout_user()
@@ -2146,7 +2181,6 @@ def get_provider_profile():
 
         staff = session_db.query(ProviderStaff).filter(
             ProviderStaff.provider_id == current_user.id,
-            ProviderStaff.is_owner == False,
         ).all()
 
         credentials = provider.credentials if provider else None
@@ -2193,13 +2227,16 @@ def serialize_service(s):
     return {
         "id": s.id,
         "name": s.name,
-        "duration": s.duration_minutes
+        "duration": s.duration_minutes,
     }
 
 def serialize_staff(s):
     return {
         "id": s.id,
+        "is_owner": s.is_owner,
         "name": s.name,
+        "email": s.email,
+        "password": "•" * 8
     }
 
 
@@ -2456,6 +2493,11 @@ def save_business_info():
 def update_email_send_code():
     email = request.form.get("email")
 
+    if not check_email_domain(email):
+        emit_to_user("error", {
+            "error": f"Die E-Mail-Adresse '{email}' hat eine ungültige oder nicht existierende Domain."})
+        return jsonify({"error": f"Ungültige Domain: {email}"}), 400
+
     SMTP_SERVER = "smtp.gmail.com"
     SMTP_PORT = 587
     YOUR_EMAIL = os.getenv("SMTP_EMAIL")
@@ -2464,6 +2506,7 @@ def update_email_send_code():
     session_db = Session()
     try:
         # Wenn keine E-Mail im POST → Resend → Session verwenden
+
         if not email:
             email = session.get("update_email")
             if not email:
@@ -2604,11 +2647,15 @@ def update_email_verify():
     if code == update_code:
         session_db = Session()
 
-        session_db.query(ProviderCredentials).filter_by(
-            provider_id=current_user.id
-        ).update({
-            ProviderCredentials.email: update_email
-        })
+        result = session_db.query(ProviderCredentials, ProviderStaff).join(
+            ProviderStaff, ProviderCredentials.provider_id == ProviderStaff.provider_id
+        ).filter(ProviderCredentials.provider_id == current_user.id, ProviderStaff.is_owner == True).first()
+
+        if result:
+            credentials, staff = result
+
+            credentials.email = update_email
+            staff.email = update_email
 
         session_db.commit()
 
@@ -2679,23 +2726,55 @@ def save_staff():
     session_db = Session()
     try:
         session_db.query(ProviderStaff).filter(
-            ProviderStaff.provider_id == current_user.id,
-            ProviderStaff.is_owner == False
+            ProviderStaff.provider_id == current_user.id
         ).delete()
+
+        session_db.commit()
 
         for s in staff:
             name = s.get("name", "").strip()
+            email = s.get("email", "").strip()
+            password = s.get("password", "").strip()
+            password_hash = bcrypt.generate_password_hash(password).decode()
+            if isinstance(password_hash, bytes):
+                password_hash = password_hash.decode('utf-8')
 
-            if not name:
+            email_already_exists = session_db.query(ProviderStaff).filter(
+                ProviderStaff.email == email,
+                ProviderStaff.provider_id != current_user.id
+            ).first()
+
+            if email_already_exists:
+                emit_to_user("error", {"error": f"Die E-Mail-Adresse '{email}' wird bereits verwendet."})
+                return jsonify({"error": f"E-Mail existiert bereits."})
+
+            if not name or not email or not password:
                 continue
 
-            session_db.add(ProviderStaff(
-                provider_id=current_user.id,
-                name=name,
-                is_owner=False
-            ))
+            if not check_email_domain(email):
+                session_db.rollback()
+                emit_to_user("error", {
+                    "error": f"Die E-Mail-Adresse '{email}' hat eine ungültige oder nicht existierende Domain."})
+                return jsonify({"error": f"Ungültige Domain: {email}"}), 400
 
-        session_db.commit()
+            try:
+                session_db.add(ProviderStaff(
+                    provider_id=current_user.id,
+                    name=name,
+                    is_owner=False,
+                    email=email,
+                    password_hash=password_hash
+                ))
+
+                session_db.commit()
+
+            except IntegrityError:
+                session_db.rollback()
+                a = session_db.query(ProviderStaff).filter_by(email=email).first()
+                print(a.provider_id, a.email)
+                emit_to_user("error", {
+                    "error": f"Ein Mitarbeiter mit dieser E-Mail-Adresse existiert bereits."})
+                return jsonify({"error": f"Mitarbeiter mit dieser E-Mail existiert bereits."}), 400
 
         if not staff:
             emit_to_user("message", {"message": "Personal erfolgreich gelöscht."})
@@ -3430,7 +3509,6 @@ def customer_queue_status_data(token, queue_id):
 
         session_db.commit()
 
-        print(entry.position_with_appointments, "position")
         return jsonify({
             "name": entry.customer_name,
             "status": statusMap[f"{entry.status}"],
@@ -3582,6 +3660,9 @@ def save_auto_complete_settings():
     finally:
         session_db.close()
 
+@app.route("/support")
+def support():
+    return render_template("support.html")
 
 @app.route("/dashboard/upgrade")
 @login_required

@@ -159,13 +159,14 @@
     }
     .form-row-value,
     .service-name,
-    .staff-name,
     .service-duration { flex: 1; }
     .form-row-value input,
     .form-row-value select,
     .service-name input,
     .service-duration input,
-    .staff-name input {
+    .staff-name input,
+    .staff-email input,
+    .staff-password input {
       width: 100%;
       padding: 9px 13px;
       border: 1px solid #d1d5db;
@@ -711,7 +712,7 @@
           <div class="section-header-icon"><i class="fa-solid fa-user-group"></i></div>
           <div>
             <div class="section-title">Dein Team</div>
-            <div class="section-desc">Diese Mitarbeiter stehen beim Erstellen von Terminen und Walk-ins zur Auswahl</div>
+            <div class="section-desc">Gibt dem Mitarbeiter Zugriff auf ein eigenes Dashboard, um Buchungen und den eigenen Tagesablauf unabhängig zu organisieren.</div>
           </div>
         </div>
 
@@ -962,17 +963,44 @@
       `;
     });
 
+    let staffHtml = "";
+
     data.staff.forEach(staff => {
-      document.getElementById("staff-list").innerHTML += `
-        <div class="staff-row">
-          <div class="staff-name flex-none w-1/2">
-            <input type="text" placeholder="Name z.B. Anna" value="${staff.name}">
+      if (staff.is_owner) {
+        staffHtml += `
+          <div class="staff-row">
+            <div class="staff-name w-1/3 flex flex-row items-center gap-2">
+                          <span class="badge ms-2" style="background-color: #d1e7dd; color: #0f5132; padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: bold;">DU</span>
+              <input type="text" placeholder="Name z.B. Anna" value="${staff.name}"  disabled>
+            </div>
+            <div class="staff-email w-1/3">
+              <input type="email" placeholder="E-Mail-Adresse" value="${staff.email}"  disabled>
+            </div>
+            <div class="staff-password w-1/3">
+              <input type="text" placeholder="Passwort" minlength="8" value="${staff.password}"  disabled>
+            </div>
+            <button class="remove-btn" disabled>🔒</button>
           </div>
-          <button onclick="this.closest('.staff-row').remove()"
-            class="remove-btn">✕</button>
-        </div>
-      `;
+        `;
+      } else {
+        staffHtml += `
+          <div class="staff-row">
+            <div class="staff-name w-1/3">
+              <input type="text" placeholder="Name z.B. Anna" value="${staff.name}" required>
+            </div>
+            <div class="staff-email w-1/3">
+              <input type="email" placeholder="E-Mail-Adresse" value="${staff.email}" required>
+            </div>
+            <div class="staff-password w-1/3">
+              <input type="text" placeholder="Passwort" minlength="8" value="${staff.password}" disabled>
+            </div>
+            <button onclick="this.closest('.staff-row').remove()"
+              class="remove-btn">✕</button>
+          </div>
+        `;
+      }
     });
+    document.getElementById("staff-list").innerHTML = staffHtml
   });
 
   const socket = io();
@@ -1037,8 +1065,14 @@
     const row = document.createElement('div');
     row.className = 'staff-row';;
     row.innerHTML = `
-      <div class="staff-name flex-none w-1/2">
-        <input type="text" placeholder="Name z.B. Anna">
+      <div class="staff-name w-1/3">
+        <input type="text" placeholder="Name z.B. Anna" required>
+      </div>
+      <div class="staff-email w-1/3">
+        <input type="email" placeholder="E-Mail-Adresse" required>
+      </div>
+      <div class="staff-password w-1/3">
+        <input type="password" placeholder="Passwort" minlength="8" required>
       </div>
       <button onclick="this.closest('.staff-row').remove()" style="background:none;border:none;color:#9ca3af;cursor:pointer;font-size:18px;padding:0 4px;">✕</button>
     `;
@@ -1078,8 +1112,14 @@
 
     staffRows.forEach(row => {
         const name = row.querySelector(".staff-name input").value.trim();
-        if (name) {
-            staff.push({ name: name });
+        const email = row.querySelector(".staff-email input").value.trim();
+        const password = row.querySelector(".staff-password input").value.trim();
+        if (name && email && password) {
+            staff.push({
+              name: name,
+              email: email,
+              password: password
+            });
         }
     });
 

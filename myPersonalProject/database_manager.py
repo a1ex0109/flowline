@@ -1,7 +1,7 @@
 from sqlalchemy import Column, Integer, String, Boolean, DateTime, Text, ForeignKey, create_engine
 from sqlalchemy.orm import DeclarativeBase, relationship, sessionmaker
 from flask_login import UserMixin
-from datetime import datetime
+from datetime import datetime, timezone
 
 engine = create_engine("sqlite:///flowline.db")
 
@@ -18,24 +18,28 @@ class Provider(Base):
     street = Column(String(300))
     postal_code = Column(String(20))
     city = Column(String(120))
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
-    credentials = relationship("ProviderCredentials", back_populates="provider", uselist=False)
-    services = relationship("ProviderService", back_populates="provider")
-    appointments = relationship("Appointment", back_populates="provider")
-    queue_entries = relationship("QueueEntry", back_populates="provider")
-    settings = relationship("ProviderSettings", back_populates="provider", uselist=False)
-    subscription = relationship("ProviderSubscription", back_populates="provider", uselist=False)
-    staff = relationship("ProviderStaff", back_populates="provider")
+    credentials = relationship("ProviderCredentials", back_populates="provider", uselist=False, cascade="all, delete-orphan")
+    services = relationship("ProviderService", back_populates="provider", cascade="all, delete-orphan")
+    appointments = relationship("Appointment", back_populates="provider", cascade="all, delete-orphan")
+    queue_entries = relationship("QueueEntry", back_populates="provider", cascade="all, delete-orphan")
+    settings = relationship("ProviderSettings", back_populates="provider", uselist=False, cascade="all, delete-orphan")
+    subscription = relationship("ProviderSubscription", back_populates="provider", uselist=False, cascade="all, delete-orphan")
+    staff = relationship("ProviderStaff", back_populates="provider", cascade="all, delete-orphan")
 
 class ProviderCredentials(Base):
     __tablename__ = "provider_credentials"
 
     id = Column(Integer, primary_key=True)
-    provider_id = Column(Integer, ForeignKey("providers.id"), unique=True, nullable=False)
+    provider_id = Column(Integer, ForeignKey("providers.id", ondelete="CASCADE"), unique=True, nullable=False)
     email = Column(String(255), unique=True, nullable=False)
     password_hash = Column(String(255), nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc)
+    )
 
     provider = relationship("Provider", back_populates="credentials", uselist=False)
 
@@ -43,7 +47,7 @@ class ProviderService(Base):
     __tablename__ = "provider_services"
 
     id = Column(Integer, primary_key=True)
-    provider_id = Column(Integer, ForeignKey("providers.id"), nullable=False)
+    provider_id = Column(Integer, ForeignKey("providers.id", ondelete="CASCADE"), nullable=False)
     name = Column(String(100), nullable=False)
     duration_minutes = Column(Integer, nullable=False)
 
@@ -53,11 +57,13 @@ class ProviderStaff(Base):
     __tablename__ = "staff"
 
     id = Column(Integer, primary_key=True)
-    provider_id = Column(Integer, ForeignKey("providers.id"), nullable=False)
+    provider_id = Column(Integer, ForeignKey("providers.id", ondelete="CASCADE"), nullable=False,)
     name = Column(String(200), nullable=False)
     is_owner = Column(Boolean, default=False)
+    email = Column(String(255), unique=True, nullable=False)
+    password_hash = Column(String(255), nullable=False)
 
-    provider = relationship("Provider", back_populates="staff", uselist=False)
+    provider = relationship("Provider", back_populates="staff")
     appointments = relationship("Appointment", back_populates="staff_member")
     queue_entries = relationship("QueueEntry", back_populates="staff_member")
 
@@ -65,7 +71,7 @@ class Appointment(Base):
     __tablename__ = "appointments"
 
     id = Column(Integer, primary_key=True)
-    provider_id = Column(Integer, ForeignKey("providers.id"), nullable=False)
+    provider_id = Column(Integer, ForeignKey("providers.id", ondelete="CASCADE"), nullable=False)
     services_json = Column(String, nullable=True)
     custom_duration = Column(Integer, nullable=True)
     staff_id = Column(Integer, ForeignKey("staff.id"), nullable=True)
@@ -90,7 +96,7 @@ class QueueEntry(Base):
     __tablename__ = "queue_entries"
 
     id = Column(Integer, primary_key=True)
-    provider_id = Column(Integer, ForeignKey("providers.id"), nullable=False)
+    provider_id = Column(Integer, ForeignKey("providers.id", ondelete="CASCADE"), nullable=False)
     services_json = Column(String, nullable=True)
     custom_duration = Column(Integer, nullable=True)
     staff_id = Column(Integer, ForeignKey("staff.id"), nullable=True)
@@ -104,7 +110,10 @@ class QueueEntry(Base):
     position = Column(Integer, nullable=False)
     original_position = Column(Integer, nullable=False)
     position_with_appointments = Column(Integer, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc)
+    )
     status = Column(String(50), default="pending")
 
     provider = relationship("Provider", back_populates="queue_entries", uselist=False)
@@ -115,7 +124,7 @@ class ProviderSettings(Base):
     __tablename__ = "provider_settings"
 
     id = Column(Integer, primary_key=True)
-    provider_id = Column(Integer, ForeignKey("providers.id"), unique=True, nullable=False)
+    provider_id = Column(Integer, ForeignKey("providers.id", ondelete="CASCADE"), unique=True, nullable=False)
 
     reminder_24h = Column(Boolean, default=True)
     reminder_3h = Column(Boolean, default=True)
@@ -134,23 +143,23 @@ class ProviderSettings(Base):
     sms_enabled = Column(Boolean, default=False)
 
     sms_credits_used = Column(Integer, default=0)
-    sms_credits_reset = Column(DateTime, default=datetime.utcnow)
+    sms_credits_reset = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     auto_complete_after_minutes = Column(Integer, default=20)
 
     queue_token = Column(String(64), unique=True, nullable=True)
 
-    provider = relationship("Provider", back_populates="settings", uselist=False)
+    provider = relationship("Provider", back_populates="settings")
 
 
 class ProviderSubscription(Base):
     __tablename__ = "provider_subscriptions"
 
     id = Column(Integer, primary_key=True)
-    provider_id = Column(Integer, ForeignKey("providers.id"), unique=True, nullable=False)
+    provider_id = Column(Integer, ForeignKey("providers.id", ondelete="CASCADE"), unique=True, nullable=False)
 
     plan = Column(String(50), nullable=False, default="free")  # free, basic, pro, premium
-    start_date = Column(DateTime, nullable=True, default=datetime.utcnow)
+    start_date = Column(DateTime(timezone=True), nullable=True, default=lambda: datetime.now(timezone.utc))
     end_date = Column(DateTime, nullable=True)
 
     is_active = Column(Boolean, default=True)
