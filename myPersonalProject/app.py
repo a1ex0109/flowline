@@ -1092,6 +1092,7 @@ def get_services_by_ids(service_ids):
 @login_required
 def appointments_today():
     now = datetime.datetime.now(datetime.timezone.utc).astimezone().replace(second=0, microsecond=0)
+    staff_id = request.args.get("staff_id")
     today = now.date()
 
     day_start = datetime.datetime.combine(today, datetime.time.min)
@@ -1103,7 +1104,11 @@ def appointments_today():
         Appointment.start.between(day_start, day_end),
         Appointment.provider_id == current_user.id,
         Appointment.status.not_in(["no_show"])
-    ).all()
+    )
+
+    if staff_id is not None:
+        appointments = appointments.filter(Appointment.staff_id == staff_id)
+    appointments = appointments.all()
 
     appointments_fc = []
 
@@ -1146,16 +1151,18 @@ def appointments_today():
 @app.route("/dashboard/appointments/next", methods=["GET"])
 @login_required
 def next_appointment():
-    #now = datetime.datetime.now(datetime.timezone.utc).astimezone().replace(second=0, microsecond=0)
+    staff_id = request.args.get("staff_id")
 
     session_db = Session()
 
     appointments = session_db.query(Appointment).filter(
         Appointment.provider_id == current_user.id,
         Appointment.status.not_in(["in_progress", "completed", "no_show"])
-        #Appointment.start > now,
-        #Appointment.status != "completed"
-    ).all()
+    )
+
+    if staff_id is not None:
+        appointments = appointments.filter(Appointment.staff_id == staff_id)
+    appointments = appointments.all()
 
     appointments_fc = []
 
@@ -1190,9 +1197,11 @@ def next_appointment():
     queues = session_db.query(QueueEntry).filter(
         QueueEntry.provider_id == current_user.id,
         QueueEntry.status.not_in(["in_progress", "completed", "no_show"])
-        #QueueEntry.start > now,
-        #QueueEntry.status != "completed"
-    ).all()
+    )
+
+    if staff_id is not None:
+        queues = queues.filter(QueueEntry.staff_id == staff_id)
+    queues = queues.all()
 
     queues_fc = []
 
@@ -1238,25 +1247,25 @@ def next_appointment():
 @app.route("/dashboard/appointments/current", methods=["GET"])
 @login_required
 def current_appointment():
-    #now = datetime.datetime.now(datetime.timezone.utc).astimezone().replace(second=0, microsecond=0)
+    staff_id = request.args.get("staff_id")
 
     session_db = Session()
 
     appointment = session_db.query(Appointment).filter(
         Appointment.provider_id == current_user.id,
-        #Appointment.start <= now,
-        #Appointment.end >= now,
-        Appointment.status == "in_progress"
-        #Appointment.status.not_in(["completed", "no_show"])
-    ).first()
+        Appointment.status == "in_progress",
+    )
 
     walkin = session_db.query(QueueEntry).filter(
         QueueEntry.provider_id == current_user.id,
-        #QueueEntry.start <= now,
-        #QueueEntry.end >= now,
-        QueueEntry.status == "in_progress"
-        #QueueEntry.status.in_(["assigned", "in_progress"])
-    ).first()
+        QueueEntry.status == "in_progress",
+    )
+
+    if staff_id is not None:
+        appointment = appointment.filter(Appointment.staff_id == staff_id)
+        walkin = walkin.filter(QueueEntry.staff_id == staff_id)
+    appointment = appointment.first()
+    walkin = walkin.first()
 
     if appointment:
         try:
@@ -1677,17 +1686,15 @@ def calculate_avg_waiting_time():
 def load_appointments_for_timeline(provider_id, staff_id):
     session_db = Session()
 
-    if staff_id:
-        appointments = session_db.query(Appointment).filter(
-            Appointment.provider_id == provider_id,
-            Appointment.staff_id == staff_id,
-            Appointment.status != "no_show"
-        ).all()
-    else:
-        appointments = session_db.query(Appointment).filter(
-            Appointment.provider_id == provider_id,
-            Appointment.status != "no_show"
-        ).all()
+    appointments = session_db.query(Appointment).filter(
+        Appointment.provider_id == provider_id,
+        Appointment.status != "no_show"
+    )
+
+    if staff_id is not None:
+        appointments = appointments.filter(Appointment.staff_id == staff_id)
+
+    appointments = appointments.all()
 
     appointments_list = []
 
@@ -1714,17 +1721,15 @@ def load_appointments_for_timeline(provider_id, staff_id):
 def load_queue_for_timeline(provider_id, staff_id):
     session_db = Session()
 
-    if staff_id:
-        queues = session_db.query(QueueEntry).filter(
-            QueueEntry.provider_id == provider_id,
-            QueueEntry.staff_id == staff_id,
-            QueueEntry.status != "no_show"
-        ).order_by(QueueEntry.position.asc()).all()
-    else:
-        queues = session_db.query(QueueEntry).filter(
-            QueueEntry.provider_id == provider_id,
-            QueueEntry.status != "no_show"
-        ).order_by(QueueEntry.position.asc()).all()
+    queues = session_db.query(QueueEntry).filter(
+        QueueEntry.provider_id == provider_id,
+        QueueEntry.status != "no_show"
+    ).order_by(QueueEntry.position.asc())
+
+    if staff_id is not None:
+        queues = queues.filter(QueueEntry.staff_id == staff_id)
+
+    queues = queues.all()
 
     queues_list = []
 
@@ -1891,11 +1896,13 @@ def find_free_slot(start_time, duration, appointments, timeline):
 def get_timeline():
     staff_id = request.args.get("staff_id")
 
-
     if not staff_id or staff_id == "null" or staff_id == "None":
         staff_id = None
     else:
-        staff_id = int(staff_id)
+        try:
+            staff_id = int(staff_id)
+        except ValueError:
+            staff_id = None
 
     session_db = Session()
     try:

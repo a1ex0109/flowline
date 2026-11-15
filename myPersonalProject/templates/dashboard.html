@@ -868,7 +868,7 @@
         populateStaffDropdown(null, staffMembers);
       } else {
         activeStaffId = selectedStaffId;
-        calendar.addEventSource(`/timeline?staff_id=${encodeURIComponent(selectedStaffId)}`);
+        calendar.addEventSource(`/timeline?staff_id=${encodeURIComponent(activeStaffId)}`);
         populateStaffDropdown(selectedStaffId, staffMembers);
       }
     });
@@ -1342,19 +1342,19 @@
   }
 
   async function getAppointmentsToday() {
-    const res = await fetch("/dashboard/appointments/today");
+    const res = await fetch(`/dashboard/appointments/today?staff_id=${encodeURIComponent(activeStaffId)}`);
     const data = await res.json();
     return data.appointments;
   }
 
   async function getNextAppointments() {
-    const res = await fetch("/dashboard/appointments/next");
+    const res = await fetch(`/dashboard/appointments/next?staff_id=${encodeURIComponent(activeStaffId)}`);
     const data = await res.json();
     return data.appointments;
   }
 
   async function getCurrentAppointments() {
-    const res = await fetch("/dashboard/appointments/current");
+    const res = await fetch(`/dashboard/appointments/current?staff_id=${encodeURIComponent(activeStaffId)}`);
     const data = await res.json();
     return data;
   }
