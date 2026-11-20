@@ -682,6 +682,7 @@ def appointments():
     services = request.form.getlist("services[]")
     custom_duration = request.form.get("custom_duration", None)
     notes = request.form.get("appointment_notes")
+    staff_id = request.form.get("staff_id")
 
     session_db = Session()
     try:
@@ -713,7 +714,7 @@ def appointments():
         total_duration = sum(duration_list)
         end_datetime = (start_datetime + datetime.timedelta(minutes=total_duration)).astimezone()
 
-        if has_conflict(provider_id, start_datetime, end_datetime):
+        if has_conflict(provider_id, start_datetime, end_datetime, staff_id=staff_id):
             emit_to_user("error", {
                 "error": "Dieser Zeitraum ist bereits vergeben."
             })
@@ -730,6 +731,7 @@ def appointments():
                 duration_minutes=total_duration,
                 notes=notes,
                 services_json=json.dumps(services),
+                staff_id=staff_id,
                 custom_duration=custom_duration if custom_duration else None,
                 status="pending",
                 appointment_token=secrets.token_urlsafe(16)
@@ -762,6 +764,7 @@ def appointments():
 @login_required
 def edit_appointment(appointment_id):
     provider_id = current_user.id
+    staff_id = request.args.get("staff_id")
 
     customer_name = request.form.get("customer_name")
     start_datetime = datetime.datetime.fromisoformat(
@@ -808,7 +811,7 @@ def edit_appointment(appointment_id):
         total_duration = sum(duration_list)
         end_datetime = (start_datetime + datetime.timedelta(minutes=total_duration)).astimezone()
 
-        if has_conflict(provider_id, start_datetime, end_datetime, appointment_id):
+        if has_conflict(provider_id, start_datetime, end_datetime, staff_id, appointment_id):
             emit_to_user("error", {
                 "error": "Dieser Zeitraum ist bereits vergeben."
             })
@@ -816,7 +819,8 @@ def edit_appointment(appointment_id):
 
         appointment = session_db.query(Appointment).filter_by(
             id=appointment_id,
-            provider_id=provider_id
+            provider_id=provider_id,
+            staff_id=staff_id
         ).first()
 
         if not appointment:
@@ -861,12 +865,13 @@ def edit_appointment(appointment_id):
         session_db.close()
 
 
-def has_conflict(provider_id, start, end, exclude_appointment_id=None):
+def has_conflict(provider_id, start, end, staff_id, exclude_appointment_id=None):
     session_db = Session()
 
     # Termine laden
     appointments = session_db.query(Appointment).filter(
         Appointment.provider_id == provider_id,
+        Appointment.staff_id == staff_id,
         Appointment.status.not_in(["no_show", "completed"])
     ).all()
 
@@ -886,6 +891,7 @@ def has_conflict(provider_id, start, end, exclude_appointment_id=None):
     # Walk-ins prüfen (ALLE außer completed/no_show)
     queues = session_db.query(QueueEntry).filter(
         QueueEntry.provider_id == provider_id,
+        QueueEntry.staff_id == staff_id,
         QueueEntry.status.not_in(["completed", "no_show"])
     ).all()
 
@@ -911,6 +917,7 @@ def move_appointment(appointment_id, type):
     data = request.get_json()
     new_start = datetime.datetime.fromisoformat(data.get("start")).astimezone()
     now = datetime.datetime.now(datetime.timezone.utc).astimezone().replace(second=0, microsecond=0)
+    staff_id = request.args.get("staff_id")
 
     if type == "Walk-in":
         emit_to_user("error", {
@@ -921,7 +928,11 @@ def move_appointment(appointment_id, type):
 
     session_db = Session()
     try:
-        appointment = session_db.query(Appointment).filter_by(id=appointment_id, provider_id=current_user.id).first()
+        appointment = session_db.query(Appointment).filter_by(
+            id=appointment_id,
+            provider_id=current_user.id,
+            staff_id=staff_id
+        ).first()
 
         if not appointment:
             emit_to_user("error", {
@@ -944,7 +955,7 @@ def move_appointment(appointment_id, type):
         duration_delta = datetime.timedelta(minutes=appointment.duration_minutes)
         end = new_start + duration_delta
 
-        if has_conflict(current_user.id, new_start, end, exclude_appointment_id=appointment_id):
+        if has_conflict(current_user.id, new_start, end, staff_id, exclude_appointment_id=appointment_id):
             emit_to_user("error", {
                 "error": "Dieser Zeitraum ist bereits vergeben."
             })
@@ -977,20 +988,22 @@ def resize_appointment(appointment_id, type):
     start = datetime.datetime.fromisoformat(data.get("start")).astimezone()
     end = datetime.datetime.fromisoformat(data.get("end")).astimezone()
     diff = int((end - start).total_seconds() / 60)
+    staff_id = request.args.get("staff_id")
 
     session_db = Session()
     try:
         if type == "Termin":
             appointment = session_db.query(Appointment).filter_by(
                 id=appointment_id,
-                provider_id=current_user.id
+                provider_id=current_user.id,
+                staff_id=staff_id
             ).first()
 
             if not appointment:
                 emit_to_user("error", {"error": "Der Termin wurde nicht gefunden."})
                 return jsonify({"error": "Termin nicht gefunden."}), 404
 
-            if has_conflict(current_user.id, start, end, exclude_appointment_id=appointment_id):
+            if has_conflict(current_user.id, start, end, staff_id, exclude_appointment_id=appointment_id):
                 emit_to_user("error", {
                     "error": "Dieser Zeitraum ist bereits vergeben."
                 })
@@ -1010,7 +1023,8 @@ def resize_appointment(appointment_id, type):
         else:
             queue = session_db.query(QueueEntry).filter_by(
                 id=appointment_id,
-                provider_id=current_user.id
+                provider_id=current_user.id,
+                staff_id=staff_id
             ).first()
 
             if not queue:
@@ -1454,6 +1468,7 @@ def add_to_queue():
     services = request.form.getlist("services[]")
     custom_duration = request.form.get("custom_duration", None)
     created_at = datetime.datetime.now().strftime("%Y-%m-%dT%H:%M")
+    staff_id = request.form.get("staff_id")
 
     session_db = Session()
     try:
@@ -1517,6 +1532,7 @@ def add_to_queue():
             customer_name=customer_name,
             customer_phone=phone_number,
             duration_minutes=sum(duration_list),
+            staff_id=staff_id,
             position=new_position,
             original_position=new_position,
             created_at=datetime.datetime.fromisoformat(created_at)
@@ -1544,12 +1560,13 @@ def add_to_queue():
 @app.route("/dashboard/queue/load", methods=["GET"])
 @login_required
 def load_queue():
-    #now = datetime.datetime.now(datetime.timezone.utc).astimezone().replace(second=0, microsecond=0)
+    staff_id  = request.args.get("staff_id")
 
     session_db = Session()
     try:
         queues = session_db.query(QueueEntry).filter_by(
             provider_id=current_user.id,
+            staff_id=staff_id
         ).order_by(QueueEntry.position.asc()).all()
 
         queue = []

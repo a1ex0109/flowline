@@ -817,7 +817,7 @@
 
       const appointmentOption = document.createElement("option");
       appointmentOption.value = value;
-      appointmentOption.textContent = staff.name;
+      appointmentOption.textContent = staff.is_owner ? `${staff.name} (Du)` : staff.name;
       appointmentOption.selected = isSelected;
       appointmentSelect.appendChild(appointmentOption);
 
@@ -854,7 +854,7 @@
     staffMembers.forEach(staff => {
       const option = document.createElement("option");
       option.value = staff.id;
-      option.text = staff.name; // Bei Bedarf wieder: staff.is_owner ? `${staff.name} (Admin)` : staff.name
+      option.text =  staff.is_owner ? `${staff.name} (Du)` : staff.name
       select.appendChild(option);
     });
 
@@ -976,7 +976,7 @@
 
         currentAppointmentId = info.event.id;
         document.getElementById('modal-title').textContent = 'Termin bearbeiten';
-        document.getElementById('appointment-form').setAttribute('onsubmit', `submitForm('/dashboard/appointments/${info.event.id}/edit', 'appointment'); return false;`);
+        document.getElementById('appointment-form').setAttribute('onsubmit', `submitForm('/dashboard/appointments/${info.event.id}/edit?staff_id=${activeStaffId}', 'appointment'); return false;`);
         document.getElementById('appointment_customer_name').value = info.event.title || '';
         document.getElementById('appointment_datetime').value = info.event.startStr.slice(0, 16) || '';
         document.getElementById('appointment_phone').value = props.phone || '';
@@ -1000,7 +1000,7 @@
       async eventDrop(info) {
         state.calendar.setOption("eventOverlap", false);
 
-        const res = await fetch(`/dashboard/appointments/${info.event.id}/${info.event.extendedProps.type}/move`, {
+        const res = await fetch(`/dashboard/appointments/${info.event.id}/${info.event.extendedProps.type}/move?staff_id=${activeStaffId}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ start: info.event.startStr.slice(0, 16) })
@@ -1025,7 +1025,7 @@
           return;
         } */
 
-        const res = await fetch(`/dashboard/appointments/${info.event.id}/${info.event.extendedProps.type}/resize`, {
+        const res = await fetch(`/dashboard/appointments/${info.event.id}/${info.event.extendedProps.type}/resize?staff_id=${activeStaffId}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ start: info.event.startStr, end: info.event.endStr })
@@ -1166,6 +1166,9 @@
     if (customDuration !== null) {
         formData.append("custom_duration", customDuration);
     }
+
+    formData.append("staff_id", activeStaffId);
+
     const res = await fetch(actionUrl, { method: "POST", body: formData });
 
     if (res.ok) {
@@ -1211,7 +1214,7 @@
   } */
 
   async function refreshQueue() {
-    const res = await fetch('/dashboard/queue/load', { method: "GET" });
+    const res = await fetch(`/dashboard/queue/load?staff_id=${activeStaffId}`, { method: "GET" });
     if (!res.ok) {
       const data = await res.json().catch(() => null);
       console.log(data?.error);
